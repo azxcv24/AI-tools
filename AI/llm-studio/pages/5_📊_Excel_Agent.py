@@ -59,6 +59,46 @@ def read_schema(path: Path) -> dict:
         return {"error": str(e)}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def count_text_cells(path_str: str) -> dict:
+    """문자가 입력된 행·열·셀의 개수를 계산.
+
+    빈 셀, NaN, 공백만 있는 셀은 모두 '비어있음' 으로 간주.
+    """
+    path = Path(path_str)
+    try:
+        if path.suffix.lower() in (".xlsx", ".xls"):
+            df = pd.read_excel(path, header=None, dtype=object)
+        elif path.suffix.lower() == ".tsv":
+            df = pd.read_csv(path, sep="\t", header=None, dtype=object, keep_default_na=False)
+        else:
+            df = pd.read_csv(path, header=None, dtype=object, keep_default_na=False)
+    except Exception as e:
+        return {"error": str(e)}
+
+    # cell-level mask: 값이 있고, str 변환 후 strip 한 게 비어있지 않은 셀
+    def has_text(v) -> bool:
+        if v is None:
+            return False
+        if isinstance(v, float) and pd.isna(v):
+            return False
+        s = str(v).strip()
+        return s != "" and s.lower() != "nan"
+
+    mask = df.map(has_text) if hasattr(df, "map") else df.applymap(has_text)
+    rows_total, cols_total = df.shape
+    rows_with_data = int(mask.any(axis=1).sum())
+    cols_with_data = int(mask.any(axis=0).sum())
+    cells_with_data = int(mask.sum().sum())
+    return {
+        "rows_total": int(rows_total),
+        "cols_total": int(cols_total),
+        "rows_with_data": rows_with_data,
+        "cols_with_data": cols_with_data,
+        "cells_with_data": cells_with_data,
+    }
+
+
 def extract_code(text: str) -> str:
     """Pull the first ```python``` (or bare ```) block from LLM output."""
     if "```python" in text:
@@ -160,6 +200,21 @@ if selected:
             if "error" in info:
                 st.error(f"읽기 실패: {info['error']}")
             else:
+                # 셀 카운터 (행/열/셀)
+                stats = count_text_cells(str(_bootstrap.UPLOADS_DIR / name))
+                if "error" not in stats:
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("문자 입력 행", f"{stats['rows_with_data']:,}",
+                              help=f"전체 {stats['rows_total']:,}행 중")
+                    m2.metric("문자 입력 열", f"{stats['cols_with_data']:,}",
+                              help=f"전체 {stats['cols_total']:,}열 중")
+                    m3.metric("문자 입력 셀", f"{stats['cells_with_data']:,}",
+                              help=f"공백·NaN 제외")
+                    density = (stats["cells_with_data"] /
+                               max(stats["rows_total"] * stats["cols_total"], 1)) * 100
+                    m4.metric("밀도", f"{density:.1f}%",
+                              help="문자 입력 셀 / 전체 그리드")
+
                 c1, c2 = st.columns([1, 3])
                 with c1:
                     st.caption(f"컬럼 ({info['n_cols']}개)")
