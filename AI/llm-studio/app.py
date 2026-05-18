@@ -100,28 +100,33 @@ st.write("")  # spacing
 st.markdown("##### 빠른 시작")
 
 cards = [
-    {"icon": "💬", "title": "Chat",       "page": "pages/1_💬_Chat.py",
+    {"icon": "💬", "title": "Chat",          "page": "pages/1_💬_Chat.py",
      "desc": "대화 + 파일 첨부, `.md` 익스포트"},
-    {"icon": "📁", "title": "Files",      "page": "pages/2_📁_Files.py",
+    {"icon": "📁", "title": "Files",         "page": "pages/2_📁_Files.py",
      "desc": "파일 업로드 · 리스트 · 다운로드 · 삭제"},
-    {"icon": "🦙", "title": "Ollama",     "page": "pages/3_🦙_Ollama.py",
+    {"icon": "🦙", "title": "Ollama",        "page": "pages/3_🦙_Ollama.py",
      "desc": "인기 모델 원클릭 Pull · 설치 관리"},
-    {"icon": "📊", "title": "Excel Agent","page": "pages/5_📊_Excel_Agent.py",
+    {"icon": "📊", "title": "Excel Agent",   "page": "pages/5_📊_Excel_Agent.py",
      "desc": "엑셀·CSV 를 자연어로 통합·집계 (격리 실행)"},
-    {"icon": "⚙️", "title": "Settings",   "page": "pages/4_⚙️_Settings.py",
+    {"icon": "✨", "title": "Prompt Studio", "page": "pages/6_✨_Prompt_Studio.py",
+     "desc": "페르소나 + 한 줄 → system prompt 향상"},
+    {"icon": "⚙️", "title": "Settings",      "page": "pages/4_⚙️_Settings.py",
      "desc": "Provider · 환경변수 (편집 가능)"},
 ]
-cols = st.columns(len(cards))
-for col, card in zip(cols, cards):
-    with col:
-        with st.container(border=True):
-            st.markdown(
-                f"<div style='font-size:2rem;line-height:1'>{card['icon']}</div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(f"**{card['title']}**")
-            st.caption(card["desc"])
-            st.page_link(card["page"], label="열기 →", icon=None)
+PER_ROW = 3
+for row_start in range(0, len(cards), PER_ROW):
+    row_cards = cards[row_start : row_start + PER_ROW]
+    cols = st.columns(PER_ROW)
+    for col, card in zip(cols, row_cards):
+        with col:
+            with st.container(border=True):
+                st.markdown(
+                    f"<div style='font-size:2rem;line-height:1'>{card['icon']}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(f"**{card['title']}**")
+                st.caption(card["desc"])
+                st.page_link(card["page"], label="열기 →", icon=None)
 
 st.write("")
 st.caption(
