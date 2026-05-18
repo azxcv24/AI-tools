@@ -1,0 +1,92 @@
+# ============================================================
+# Secrets / credentials — NEVER commit
+# ============================================================
+.env
+.env.local
+.env.*.local
+.env.production
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+.streamlit/secrets.toml
+
+# ============================================================
+# Data / uploads / model weights — NEVER commit
+# ============================================================
+data/
+uploads/
+outputs/
+downloads/
+models/
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.ckpt
+*.onnx
+
+# Per-category data dirs (gitignored everywhere they appear)
+**/data/
+**/uploads/
+**/outputs/
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# ============================================================
+# Notebooks
+# ============================================================
+.ipynb_checkpoints/
+
+# ============================================================
+# Logs / DBs
+# ============================================================
+*.log
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================================
+# IDE / OS
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# Node (in case tooling uses it)
+# ============================================================
+node_modules/
+
+# ============================================================
+# Allow-list (do NOT ignore)
+# ============================================================
+!.gitkeep
+!.env.example
