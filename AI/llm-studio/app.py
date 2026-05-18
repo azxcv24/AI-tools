@@ -100,16 +100,18 @@ st.write("")  # spacing
 st.markdown("##### 빠른 시작")
 
 cards = [
-    {"icon": "💬", "title": "Chat",     "page": "pages/1_💬_Chat.py",
-     "desc": "Provider · 모델 선택 후 대화, `.md` 익스포트"},
-    {"icon": "📁", "title": "Files",    "page": "pages/2_📁_Files.py",
+    {"icon": "💬", "title": "Chat",       "page": "pages/1_💬_Chat.py",
+     "desc": "대화 + 파일 첨부, `.md` 익스포트"},
+    {"icon": "📁", "title": "Files",      "page": "pages/2_📁_Files.py",
      "desc": "파일 업로드 · 리스트 · 다운로드 · 삭제"},
-    {"icon": "🦙", "title": "Ollama",   "page": "pages/3_🦙_Ollama.py",
-     "desc": "인기 모델 원클릭 Pull · 설치 모델 관리"},
-    {"icon": "⚙️", "title": "Settings", "page": "pages/4_⚙️_Settings.py",
-     "desc": "Provider · 환경변수 상태 확인 (마스킹)"},
+    {"icon": "🦙", "title": "Ollama",     "page": "pages/3_🦙_Ollama.py",
+     "desc": "인기 모델 원클릭 Pull · 설치 관리"},
+    {"icon": "📊", "title": "Excel Agent","page": "pages/5_📊_Excel_Agent.py",
+     "desc": "엑셀·CSV 를 자연어로 통합·집계 (격리 실행)"},
+    {"icon": "⚙️", "title": "Settings",   "page": "pages/4_⚙️_Settings.py",
+     "desc": "Provider · 환경변수 (편집 가능)"},
 ]
-cols = st.columns(4)
+cols = st.columns(len(cards))
 for col, card in zip(cols, cards):
     with col:
         with st.container(border=True):
