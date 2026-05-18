@@ -140,12 +140,24 @@ with st.sidebar:
 
     st.divider()
     st.markdown("##### 프롬프트")
+
+    # Prompt Studio 에서 적용된 system prompt 가 있으면 한 번만 받아서 default 로
+    if "applied_system_prompt" in st.session_state and "chat_system_default" not in st.session_state:
+        st.session_state.chat_system_default = st.session_state.pop("applied_system_prompt")
+        applied_label = st.session_state.pop("applied_persona_label", None)
+        if applied_label:
+            st.markdown(badge(f"✨ {applied_label}", "info"), unsafe_allow_html=True)
+        else:
+            st.markdown(badge("✨ Prompt Studio 에서 적용됨", "info"), unsafe_allow_html=True)
+
     system = st.text_area(
         "System prompt",
-        value="You are a helpful assistant.",
-        height=100,
+        value=st.session_state.get("chat_system_default", "You are a helpful assistant."),
+        height=120,
         label_visibility="collapsed",
+        key="chat_system_prompt",
     )
+    st.page_link("pages/6_✨_Prompt_Studio.py", label="✨ Prompt Studio 에서 편집/생성")
 
     # -------- 📎 첨부 파일 --------
     st.divider()
