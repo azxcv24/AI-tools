@@ -7,7 +7,14 @@ import _bootstrap  # noqa: F401,E402
 import streamlit as st  # noqa: E402
 
 from components import badge, inject_global_css, page_header, sidebar_brand  # noqa: E402
-from shared.llm import list_providers  # noqa: E402
+from shared.llm import (  # noqa: E402
+    PROVIDER_KINDS,
+    Endpoint,
+    get_endpoints,
+    has_api_key,
+    list_providers,
+    test_connection,
+)
 from shared.llm.config import (  # noqa: E402
     env_file_status,
     get_secret,
@@ -119,10 +126,193 @@ if edit_mode:
 
 
 # ============================================================
-# 등록된 Provider
+# 📡 연결 지점 (Endpoints)
+# ============================================================
+endpoints_reg = get_endpoints()
+
+st.markdown("##### 📡 연결 지점 (Endpoints)")
+st.caption(
+    "이름이 붙은 LLM 연결. 같은 provider 의 여러 인스턴스를 운영할 수 있습니다. "
+    "API 키는 `.env` 의 환경변수 이름으로 참조 — 실제 키 값은 아래 그룹에서 설정."
+)
+
+eps = endpoints_reg.list()
+for ep in eps:
+    with st.container(border=True):
+        c1, c2, c3, c4 = st.columns([4, 2.5, 1.6, 2.4])
+        with c1:
+            badges = [badge(ep.provider_kind, "info")]
+            if ep.is_default:
+                badges.append(badge("기본", "off"))
+            else:
+                badges.append(badge("커스텀", "ok"))
+            if not ep.enabled:
+                badges.append(badge("비활성", "warn"))
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:8px'>"
+                f"<span style='font-size:1.4rem'>{ep.icon}</span>"
+                f"<span style='font-weight:600'>{ep.name}</span>"
+                f"<code>{ep.slug}</code> {' '.join(badges)}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            details: list[str] = []
+            if ep.base_url:
+                details.append(f"`{ep.base_url}`")
+            if ep.api_key_env:
+                key_state = "설정됨" if has_api_key(ep) else "미설정"
+                details.append(f"key env `{ep.api_key_env}` · {key_state}")
+            elif ep.provider_kind == "ollama":
+                details.append("key 불필요")
+            if ep.default_model:
+                details.append(f"기본 모델 `{ep.default_model}`")
+            st.caption(" · ".join(details) or "—")
+        with c2:
+            if st.button(
+                "🧪 테스트",
+                key=f"test_ep_{ep.slug}",
+                use_container_width=True,
+                disabled=not ep.enabled,
+            ):
+                with st.spinner(f"`{ep.slug}` 테스트 중…"):
+                    ok, msg = test_connection(ep)
+                if ok:
+                    st.toast(f"✅ {ep.slug}: {msg}", icon="📡")
+                else:
+                    st.toast(f"❌ {ep.slug}: {msg}", icon="⚠️")
+        with c3:
+            if ep.provider_kind == "ollama":
+                st.page_link("pages/3_🦙_Ollama.py", label="📥 모델 관리")
+        with c4:
+            cx, cy = st.columns(2)
+            if cx.button(
+                "✏️" if not ep.is_default else "⏸️",
+                key=f"edit_ep_{ep.slug}",
+                use_container_width=True,
+                help="편집" if not ep.is_default else ("비활성화" if ep.enabled else "활성화"),
+            ):
+                if ep.is_default:
+                    endpoints_reg.set_enabled(ep.slug, not ep.enabled)
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.session_state["edit_endpoint_slug"] = ep.slug
+                    st.session_state["show_endpoint_dialog"] = True
+                    st.rerun()
+            if cy.button(
+                "🗑️",
+                key=f"del_ep_{ep.slug}",
+                use_container_width=True,
+                help="삭제 (기본 엔드포인트는 비활성화로 대체)",
+                disabled=ep.is_default,
+            ):
+                try:
+                    endpoints_reg.delete(ep.slug)
+                    st.cache_data.clear()
+                    st.toast(f"🗑️ `{ep.slug}` 삭제", icon="📡")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
+
+cx, _ = st.columns([1.2, 4])
+if cx.button("➕ 새 엔드포인트", type="primary", use_container_width=True):
+    st.session_state["edit_endpoint_slug"] = None
+    st.session_state["show_endpoint_dialog"] = True
+    st.rerun()
+
+
+# ----- dialog: create / edit endpoint -----
+@st.dialog("엔드포인트 편집")
+def endpoint_dialog():
+    slug_to_edit = st.session_state.get("edit_endpoint_slug")
+    existing = endpoints_reg.get(slug_to_edit) if slug_to_edit else None
+
+    with st.form("endpoint_form", border=False):
+        new_slug = st.text_input(
+            "슬러그 (id)",
+            value=existing.slug if existing else "",
+            disabled=existing is not None,
+            help="소문자·숫자·하이픈, 1-64자",
+        )
+        name = st.text_input("이름", value=existing.name if existing else "")
+        kind = st.selectbox(
+            "Provider kind",
+            list(PROVIDER_KINDS),
+            index=PROVIDER_KINDS.index(existing.provider_kind) if existing else 0,
+        )
+        base_url = st.text_input(
+            "Base URL",
+            value=existing.base_url or "" if existing else "",
+            placeholder="예: http://localhost:11434 (ollama) · https://api.example.com (litellm)",
+            help="ollama·litellm 에서만 사용. openai/anthropic 은 비워두세요.",
+        )
+        api_key_env = st.text_input(
+            "API key env 변수 이름",
+            value=existing.api_key_env or "" if existing else "",
+            placeholder="예: OPENAI_API_KEY, ANTHROPIC_API_KEY, LITELLM_API_KEY_SEOUL",
+            help="실제 값은 아래 .env 그룹 UI 로 설정하세요.",
+        )
+        default_model = st.text_input(
+            "기본 모델 (선택)",
+            value=existing.default_model or "" if existing else "",
+            placeholder="예: claude-sonnet-4-6, gpt-4o-mini, llama3.1:8b",
+        )
+        extra_str = st.text_input(
+            "추가 옵션 (key=value, 쉼표 구분)",
+            value=", ".join(f"{k}={v}" for k, v in existing.extra_options.items())
+                  if existing and existing.extra_options else "",
+            placeholder="예: timeout=180, max_tokens=8192",
+        )
+        enabled = st.checkbox("활성화", value=existing.enabled if existing else True)
+
+        c_cancel, c_save = st.columns(2)
+        cancel = c_cancel.form_submit_button("취소", use_container_width=True)
+        save = c_save.form_submit_button("💾 저장", type="primary", use_container_width=True)
+
+    if cancel:
+        st.session_state.pop("show_endpoint_dialog", None)
+        st.rerun()
+
+    if save:
+        try:
+            extra_options: dict[str, str] = {}
+            for piece in (extra_str or "").split(","):
+                piece = piece.strip()
+                if not piece:
+                    continue
+                if "=" not in piece:
+                    raise ValueError(f"형식 오류: '{piece}' (key=value 필요)")
+                k, v = piece.split("=", 1)
+                extra_options[k.strip()] = v.strip()
+
+            ep_new = Endpoint(
+                slug=new_slug.strip(),
+                name=name.strip() or new_slug.strip(),
+                provider_kind=kind,
+                base_url=base_url.strip() or None,
+                api_key_env=api_key_env.strip() or None,
+                default_model=default_model.strip() or None,
+                extra_options=extra_options,
+                enabled=enabled,
+            )
+            endpoints_reg.save(ep_new)
+            st.cache_data.clear()
+            st.toast(f"💾 엔드포인트 `{ep_new.slug}` 저장", icon="📡")
+            st.session_state.pop("show_endpoint_dialog", None)
+            st.rerun()
+        except Exception as e:
+            st.error(f"저장 실패: {type(e).__name__}: {e}")
+
+
+if st.session_state.get("show_endpoint_dialog"):
+    endpoint_dialog()
+
+
+# ============================================================
+# 등록된 Provider (참고용)
 # ============================================================
 with st.container(border=True):
-    st.markdown("##### 📡 등록된 Provider")
+    st.markdown("##### 🧩 등록된 Provider 종류")
     cols = st.columns(len(list_providers()))
     for col, p in zip(cols, list_providers()):
         col.markdown(
@@ -132,7 +322,7 @@ with st.container(border=True):
             f"</div>",
             unsafe_allow_html=True,
         )
-    st.caption("새 provider 등록: `shared/llm/factory.register_provider()`")
+    st.caption("provider 종류 자체를 추가하려면 `shared/llm/factory.register_provider()`")
 
 
 # ============================================================

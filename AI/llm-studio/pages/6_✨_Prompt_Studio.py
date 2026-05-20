@@ -10,15 +10,11 @@ from components import (  # noqa: E402
     badge,
     inject_global_css,
     page_header,
+    render_sidebar,
     sidebar_brand,
 )
-from shared.llm import (  # noqa: E402
-    PERSONAS,
-    PERSONAS_BY_SLUG,
-    enhance_to_system_prompt,
-    get_provider,
-    list_providers,
-)
+from shared.llm import enhance_to_system_prompt, resolve  # noqa: E402
+from shared.skills import Skill, get_registry  # noqa: E402
 
 st.set_page_config(page_title="Prompt Studio · LLM Studio", page_icon="✨", layout="wide")
 inject_global_css()
@@ -27,61 +23,38 @@ sidebar_brand()
 page_header(
     "✨",
     "Prompt Studio",
-    "페르소나 라이브러리에서 고르거나, 한 줄 설명을 system prompt 로 향상시켜 Chat 에 적용합니다.",
+    "라이브러리(chat-system 스킬)에서 고르거나, 한 줄 설명을 system prompt 로 향상해 Chat 또는 새 스킬에 저장합니다.",
 )
 
 
 # ============================================================
-# sidebar — model for enhancement
+# sidebar
 # ============================================================
-@st.cache_data(ttl=300, show_spinner="모델 리스트 조회 중…")
-def fetch_models(provider_name: str) -> tuple[list[str], str | None]:
-    try:
-        return list(get_provider(provider_name, model="-").list_models()), None
-    except Exception as e:
-        return [], f"{type(e).__name__}: {e}"
-
-
-with st.sidebar:
-    st.markdown("##### 🤖 향상 작업용 모델")
-    providers = list_providers()
-    default_idx = (
-        providers.index("litellm") if "litellm" in providers
-        else providers.index("ollama") if "ollama" in providers
-        else 0
-    )
-    provider_name = st.selectbox("Provider", providers, index=default_idx)
-
-    c1, c2 = st.columns([4, 1])
-    c1.caption("Model")
-    if c2.button("🔄", help="새로고침", use_container_width=True, key="refresh_studio"):
-        fetch_models.clear()
-        st.rerun()
-
-    models, err = fetch_models(provider_name)
-    if err:
-        st.warning(f"리스트 조회 실패\n\n```\n{err}\n```")
-        model = st.text_input("Model (수동)", value="", label_visibility="collapsed")
-    elif not models:
-        model = st.text_input("Model (수동)", value="", label_visibility="collapsed")
-    else:
-        key = f"studio_model__{provider_name}"
-        prev = st.session_state.get(key)
-        idx = models.index(prev) if prev in models else 0
-        model = st.selectbox("Model", models, index=idx,
-                             key=f"studio_select_{provider_name}", label_visibility="collapsed")
-        st.session_state[key] = model
-
-    st.caption("향상 작업은 instruct 능력이 좋은 모델 (claude / gpt / qwen2.5+) 권장")
+state = render_sidebar(
+    "prompt-studio",
+    kinds=["chat-system", "prompt-enhance"],
+    default_system_prompt="",
+)
 
 
 # ============================================================
-# state — current prompt being edited
+# state
 # ============================================================
 if "studio_prompt" not in st.session_state:
     st.session_state.studio_prompt = ""
 if "studio_persona" not in st.session_state:
-    st.session_state.studio_persona = None  # slug of active library persona, or None
+    st.session_state.studio_persona = None  # slug of active library skill
+
+
+# When a chat-system skill is picked in the sidebar, mirror it into the editor.
+if state.skill and state.skill.kind == "chat-system":
+    if st.session_state.studio_persona != state.skill.slug:
+        st.session_state.studio_prompt = state.skill.system_prompt
+        st.session_state.studio_persona = state.skill.slug
+
+
+registry = get_registry()
+library_skills: list[Skill] = registry.by_kind("chat-system")
 
 
 # ============================================================
@@ -90,19 +63,20 @@ if "studio_persona" not in st.session_state:
 left, right = st.columns([1.1, 2])
 
 
-# ---------- LEFT: persona library ----------
 with left:
-    st.markdown("##### 📚 페르소나 라이브러리")
-    st.caption("큐레이션된 시스템 프롬프트 — 선택하면 오른쪽 편집기로 불러옵니다.")
+    st.markdown("##### 📚 라이브러리 (chat-system 스킬)")
+    st.caption("선택하면 오른쪽 편집기로 불러옵니다. 사용자 스킬도 함께 표시됨.")
 
-    for p in PERSONAS:
+    for p in library_skills:
         active = st.session_state.studio_persona == p.slug
         with st.container(border=True):
             c1, c2 = st.columns([5, 2])
+            lock = " 🔒" if p.readonly else ""
             c1.markdown(
-                f"<div style='font-size:1.1rem'><span style='font-size:1.5rem'>{p.icon}</span>"
-                f" <b>{p.name}</b></div>"
-                f"<div style='color:#64748B;font-size:0.85rem;margin-top:2px'>{p.description}</div>",
+                f"<div style='font-size:1.05rem'>"
+                f"<span style='font-size:1.4rem'>{p.icon}</span> "
+                f"<b>{p.name}</b>{lock}</div>"
+                f"<div style='color:#64748B;font-size:0.83rem;margin-top:2px'>{p.description}</div>",
                 unsafe_allow_html=True,
             )
             if active:
@@ -114,16 +88,15 @@ with left:
                     st.rerun()
 
 
-# ---------- RIGHT: editor + enhancer ----------
 with right:
     st.markdown("##### 📝 System prompt")
 
-    # active persona indicator
     if st.session_state.studio_persona:
-        p = PERSONAS_BY_SLUG.get(st.session_state.studio_persona)
-        if p:
+        active_skill = registry.get(st.session_state.studio_persona)
+        if active_skill:
             st.markdown(
-                f"<div style='margin-bottom:8px'>{badge(f'{p.icon} {p.name}', 'info')}"
+                f"<div style='margin-bottom:8px'>"
+                f"{badge(f'{active_skill.icon} {active_skill.name}', 'info')}"
                 f" <span style='color:#64748B;font-size:0.85rem'>· 라이브러리에서 불러옴 (자유롭게 편집 가능)</span></div>",
                 unsafe_allow_html=True,
             )
@@ -136,16 +109,15 @@ with right:
         label_visibility="collapsed",
         placeholder="시스템 프롬프트를 직접 작성하거나, 라이브러리에서 불러오거나, 아래 ✨ 향상 기능을 사용하세요.",
     )
-    # keep state in sync
     if prompt != st.session_state.studio_prompt:
         st.session_state.studio_prompt = prompt
         # editing detaches from library
         if st.session_state.studio_persona:
-            p = PERSONAS_BY_SLUG.get(st.session_state.studio_persona)
-            if p and prompt != p.system_prompt:
+            active_skill = registry.get(st.session_state.studio_persona)
+            if active_skill and prompt != active_skill.system_prompt:
                 st.session_state.studio_persona = None
 
-    c1, c2, c3 = st.columns([1.2, 1.2, 1])
+    c1, c2, c3, c4 = st.columns([1, 1.3, 1.3, 1])
     if c1.button("🆕 비우기", use_container_width=True):
         st.session_state.studio_prompt = ""
         st.session_state.studio_persona = None
@@ -153,13 +125,19 @@ with right:
     if c2.button("💬 Chat 에 적용", type="primary", use_container_width=True,
                  disabled=not prompt.strip()):
         st.session_state["applied_system_prompt"] = prompt
-        st.session_state["applied_persona_label"] = (
-            f"{PERSONAS_BY_SLUG[st.session_state.studio_persona].icon} "
-            f"{PERSONAS_BY_SLUG[st.session_state.studio_persona].name}"
+        active = (
+            registry.get(st.session_state.studio_persona)
             if st.session_state.studio_persona else None
         )
+        st.session_state["applied_persona_label"] = (
+            f"{active.icon} {active.name}" if active else None
+        )
+        # Clear Chat sidebar state so it picks up the new prompt
+        st.session_state.pop("sidebar_system__chat", None)
         st.toast("💬 Chat 페이지의 system prompt 로 적용됨", icon="✨")
-    c3.download_button(
+    if c3.button("💾 스킬로 저장", use_container_width=True, disabled=not prompt.strip()):
+        st.session_state["show_save_skill_dialog"] = True
+    c4.download_button(
         "💾 .md",
         data=prompt.encode("utf-8") if prompt else b"",
         file_name="system_prompt.md",
@@ -170,7 +148,6 @@ with right:
 
     st.divider()
 
-    # ---------- enhancement ----------
     st.markdown("##### ✨ 한 줄 설명 → System prompt 로 향상")
     st.caption(
         "어떤 어시스턴트를 원하는지 짧게 적으면 LLM 이 페르소나·전문성·말투·가이드라인을 갖춘 "
@@ -193,23 +170,23 @@ with right:
     enhance_clicked = c1.button(
         "✨ 향상",
         type="primary",
-        disabled=not (description.strip() and model),
+        disabled=not (description.strip() and state.model and state.endpoint),
         use_container_width=True,
     )
-    if not model:
+    if not state.model:
         c2.caption("모델을 먼저 선택하세요.")
 
     if enhance_clicked:
         try:
-            llm = get_provider(provider_name, model=model)
-            with st.spinner(f"`{model}` 로 향상 중…"):
+            llm = resolve(state.endpoint, model=state.model)
+            with st.spinner(f"`{state.model}` 로 향상 중…"):
                 enhanced = enhance_to_system_prompt(
                     llm,
                     description=description,
                     extra_constraints=constraints,
                 )
             st.session_state.studio_prompt = enhanced
-            st.session_state.studio_persona = None  # custom now
+            st.session_state.studio_persona = None
             st.toast("✅ system prompt 생성됨 — 위 편집기에서 확인", icon="✨")
             st.rerun()
         except Exception as e:
@@ -217,8 +194,51 @@ with right:
 
 
 # ============================================================
-# footer hint
+# save-as-skill dialog
 # ============================================================
+@st.dialog("스킬로 저장")
+def save_skill_dialog():
+    with st.form("save_skill_form", border=False):
+        slug = st.text_input("슬러그 (id)", placeholder="예: korean-translator")
+        name = st.text_input("이름", placeholder="예: 한국어 번역가")
+        icon = st.text_input("아이콘", value="💬", max_chars=4)
+        description = st.text_input("설명 (한 줄)")
+        tags_str = st.text_input("태그 (쉼표 구분)", placeholder="예: chat, ko")
+        st.caption("System prompt 는 현재 편집기 내용으로 저장됩니다.")
+        cx, cy = st.columns(2)
+        cancel = cx.form_submit_button("취소", use_container_width=True)
+        save = cy.form_submit_button("💾 저장", type="primary", use_container_width=True)
+
+    if cancel:
+        st.session_state.pop("show_save_skill_dialog", None)
+        st.rerun()
+    if save:
+        try:
+            tags = tuple(t.strip() for t in (tags_str or "").split(",") if t.strip())
+            skill = Skill(
+                slug=slug.strip(),
+                name=name.strip() or slug.strip(),
+                icon=icon.strip() or "💬",
+                kind="chat-system",
+                description=description.strip(),
+                system_prompt=st.session_state.studio_prompt,
+                user_prompt_template="",
+                tags=tags,
+                default_endpoint=state.endpoint.slug if state.endpoint else None,
+                default_model=state.model or None,
+            )
+            saved = registry.save(skill)
+            st.toast(f"💾 `{saved.slug}` 저장", icon="🧰")
+            st.session_state.pop("show_save_skill_dialog", None)
+            st.rerun()
+        except Exception as e:
+            st.error(f"저장 실패: {type(e).__name__}: {e}")
+
+
+if st.session_state.get("show_save_skill_dialog"):
+    save_skill_dialog()
+
+
 st.divider()
 st.caption(
     "💡 적용 후 Chat 페이지로 이동하면 사이드바 System prompt 가 자동으로 채워집니다. "

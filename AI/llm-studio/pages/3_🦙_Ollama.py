@@ -9,19 +9,42 @@ from datetime import datetime  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from components import badge, empty_state, inject_global_css, page_header, sidebar_brand  # noqa: E402
-from shared.llm import get_provider  # noqa: E402
+from shared.llm import get_endpoints, get_provider, resolve  # noqa: E402
 
 st.set_page_config(page_title="Ollama · LLM Studio", page_icon="🦙", layout="wide")
 inject_global_css()
 sidebar_brand()
 
-ollama = get_provider("ollama", model="-")
+# Pick endpoint via ?endpoint=<slug> query param (deep-linked from Settings).
+# Defaults to the first enabled ollama endpoint, else env-based.
+def _pick_ollama_endpoint():
+    slug = st.query_params.get("endpoint")
+    if slug:
+        ep = get_endpoints().get(slug)
+        if ep and ep.provider_kind == "ollama":
+            return ep
+    for ep in get_endpoints().list():
+        if ep.provider_kind == "ollama" and ep.enabled:
+            return ep
+    return None
+
+
+_active_ep = _pick_ollama_endpoint()
+if _active_ep is not None:
+    try:
+        ollama = resolve(_active_ep, model="-")
+    except Exception:
+        ollama = get_provider("ollama", model="-")
+else:
+    ollama = get_provider("ollama", model="-")
+
 healthy = ollama.health()
 
+_ep_label = _active_ep.name if _active_ep else "기본"
 page_header(
     "🦙",
     "Ollama",
-    f"로컬·원격 Ollama 서버의 모델을 관리합니다 · `{ollama.base_url}`",
+    f"{_ep_label} · `{ollama.base_url}` — 로컬·원격 Ollama 서버의 모델을 관리합니다.",
 )
 
 

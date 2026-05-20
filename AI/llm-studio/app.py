@@ -8,8 +8,7 @@ from components import (
     page_header,
     sidebar_brand,
 )
-from shared.llm import get_provider
-from shared.llm.config import get_secret
+from shared.llm import get_endpoints, has_api_key, test_connection
 
 st.set_page_config(
     page_title="LLM Studio",
@@ -23,95 +22,82 @@ sidebar_brand()
 page_header(
     icon="🧪",
     title="LLM Studio",
-    subtitle="Streamlit 기반 LLM 플레이그라운드 · 여러 provider 를 한 곳에서.",
+    subtitle="Streamlit 기반 LLM 플레이그라운드 · 엔드포인트·스킬·격리 실행을 한 곳에서.",
 )
 
 
 # ============================================================
-# Provider 상태 (실시간 점검)
+# 엔드포인트 상태 (실시간 점검)
 # ============================================================
 @st.cache_data(ttl=15, show_spinner=False)
-def check_status() -> list[dict]:
-    """Light health-check each provider — returns rows for the dashboard."""
+def _endpoint_status_rows() -> list[dict]:
     rows: list[dict] = []
-
-    # ---- Ollama ----
-    try:
-        o = get_provider("ollama", model="-")
-        if o.health():
-            n = len(o.list_models())
-            rows.append({"name": "Ollama", "icon": "🦙", "status": "ok",
-                         "detail": f"{n}개 모델 설치됨", "tip": o.base_url})
-        else:
-            rows.append({"name": "Ollama", "icon": "🦙", "status": "err",
-                         "detail": "서버 연결 불가", "tip": o.base_url})
-    except Exception as e:
-        rows.append({"name": "Ollama", "icon": "🦙", "status": "err",
-                     "detail": f"오류: {e}", "tip": "-"})
-
-    # ---- OpenAI / Anthropic / LiteLLM — key 존재 + 패키지 import 가능 여부 ----
-    for label, icon, name, env_key in [
-        ("OpenAI",    "☁️", "openai",    "OPENAI_API_KEY"),
-        ("Anthropic", "🧠", "anthropic", "ANTHROPIC_API_KEY"),
-        ("LiteLLM",   "⚡", "litellm",   "LITELLM_API_KEY"),
-    ]:
-        has_key = bool(get_secret(env_key)) or (name == "litellm" and bool(get_secret("LITELLM_BASE_URL")))
-        try:
-            get_provider(name, model="-")
-            rows.append({"name": label, "icon": icon, "status": "ok",
-                         "detail": "준비 완료", "tip": "키 설정됨"})
-        except ImportError:
-            rows.append({"name": label, "icon": icon, "status": "off",
-                         "detail": "패키지 미설치", "tip": f"pip install 'ai-tools[{name}]'"})
-        except RuntimeError:
-            rows.append({"name": label, "icon": icon, "status": "warn",
-                         "detail": f"{env_key} 없음" if not has_key else "키 오류",
-                         "tip": ".env 에 추가"})
-        except Exception as e:
-            rows.append({"name": label, "icon": icon, "status": "err",
-                         "detail": str(e)[:40], "tip": "-"})
-
+    for ep in get_endpoints().list():
+        if not ep.enabled:
+            rows.append({
+                "icon": ep.icon, "name": ep.name, "status": "off",
+                "detail": "비활성", "tip": ep.slug,
+            })
+            continue
+        if ep.api_key_env and not has_api_key(ep):
+            rows.append({
+                "icon": ep.icon, "name": ep.name, "status": "warn",
+                "detail": f"{ep.api_key_env} 없음", "tip": "Settings 에서 설정",
+            })
+            continue
+        ok, msg = test_connection(ep)
+        rows.append({
+            "icon": ep.icon, "name": ep.name,
+            "status": "ok" if ok else "err",
+            "detail": msg[:50],
+            "tip": ep.slug,
+        })
     return rows
 
 
-st.markdown("##### 시스템 상태")
-c1, c2, c3, c4 = st.columns(4)
-rows = check_status()
-for col, row in zip([c1, c2, c3, c4], rows):
-    with col:
-        with st.container(border=True):
-            label_map = {"ok": "정상", "warn": "주의", "err": "오프", "off": "비활성"}
-            st.markdown(
-                f"<div style='display:flex;justify-content:space-between;align-items:center'>"
-                f"<span style='font-size:1.3rem'>{row['icon']} <b>{row['name']}</b></span>"
-                f"{badge(label_map[row['status']], row['status'])}"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-            st.caption(row["detail"])
-            st.caption(f"`{row['tip']}`")
+st.markdown("##### 📡 엔드포인트 상태")
+rows = _endpoint_status_rows()[:4]   # show first 4 to fit the row
+if not rows:
+    st.info("등록된 엔드포인트가 없습니다. Settings 페이지에서 추가하세요.")
+else:
+    cols = st.columns(len(rows))
+    label_map = {"ok": "정상", "warn": "주의", "err": "오류", "off": "비활성"}
+    for col, row in zip(cols, rows):
+        with col:
+            with st.container(border=True):
+                st.markdown(
+                    f"<div style='display:flex;justify-content:space-between;align-items:center'>"
+                    f"<span style='font-size:1.3rem'>{row['icon']} <b>{row['name']}</b></span>"
+                    f"{badge(label_map[row['status']], row['status'])}"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(row["detail"])
+                st.caption(f"`{row['tip']}`")
 
-st.write("")  # spacing
+st.write("")
 
 
 # ============================================================
-# 빠른 시작 — 페이지 카드
+# 빠른 시작
 # ============================================================
 st.markdown("##### 빠른 시작")
 
 cards = [
     {"icon": "💬", "title": "Chat",          "page": "pages/1_💬_Chat.py",
-     "desc": "대화 + 파일 첨부, `.md` 익스포트"},
+     "desc": "대화 + 파일 첨부, `.md` 익스포트 · 사이드바에 스킬 드롭다운"},
     {"icon": "📁", "title": "Files",         "page": "pages/2_📁_Files.py",
      "desc": "파일 업로드 · 리스트 · 다운로드 · 삭제"},
     {"icon": "🦙", "title": "Ollama",        "page": "pages/3_🦙_Ollama.py",
      "desc": "인기 모델 원클릭 Pull · 설치 관리"},
     {"icon": "📊", "title": "Excel Agent",   "page": "pages/5_📊_Excel_Agent.py",
-     "desc": "엑셀·CSV 를 자연어로 통합·집계 (격리 실행)"},
+     "desc": "구조 자동 인식 → 스킬로 집계 (격리 실행)"},
     {"icon": "✨", "title": "Prompt Studio", "page": "pages/6_✨_Prompt_Studio.py",
-     "desc": "페르소나 + 한 줄 → system prompt 향상"},
+     "desc": "라이브러리 + 한 줄 → system prompt 향상"},
+    {"icon": "🧰", "title": "Skills",        "page": "pages/7_🧰_Skills.py",
+     "desc": "재사용 가능한 시스템 프롬프트·작업 템플릿 관리"},
     {"icon": "⚙️", "title": "Settings",      "page": "pages/4_⚙️_Settings.py",
-     "desc": "Provider · 환경변수 (편집 가능)"},
+     "desc": "📡 엔드포인트 + 환경변수 편집"},
 ]
 PER_ROW = 3
 for row_start in range(0, len(cards), PER_ROW):
@@ -130,5 +116,5 @@ for row_start in range(0, len(cards), PER_ROW):
 
 st.write("")
 st.caption(
-    "🔐 보안 — 모든 비밀 값은 `.env` 에서 로드, 화면 표시는 마스킹됩니다. · 시스템 상태는 15초 캐시."
+    "🔐 비밀 값은 `.env` 에서 로드, 표시는 마스킹. · 엔드포인트 상태는 15초 캐시."
 )

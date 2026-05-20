@@ -14,16 +14,17 @@ from components import (  # noqa: E402
     empty_state,
     inject_global_css,
     page_header,
+    render_sidebar,
     sidebar_brand,
 )
-from shared.llm import Message, get_provider, list_providers  # noqa: E402
+from shared.llm import Message, resolve  # noqa: E402
 from shared.storage import FileManager  # noqa: E402
 
 st.set_page_config(page_title="Chat · LLM Studio", page_icon="💬", layout="wide")
 inject_global_css()
 sidebar_brand()
 
-page_header("💬", "Chat", "Provider · 모델 · 첨부 파일을 골라 대화하세요. 결과는 Files 폴더 또는 .md 로 저장됩니다.")
+page_header("💬", "Chat", "엔드포인트·모델·스킬·첨부 파일을 골라 대화하세요. 결과는 Files 폴더 또는 .md 로 저장됩니다.")
 
 
 # ============================================================
@@ -35,8 +36,8 @@ TEXT_EXTS = {
     "sh", "bash", "zsh", "html", "css", "xml", "log", "ini", "cfg", "conf", "env",
     "sql", "rb", "php", "kt", "swift", "lua", "r", "scala",
 }
-MAX_PER_FILE = 50 * 1024        # 50 KB
-MAX_TOTAL    = 200 * 1024       # 200 KB
+MAX_PER_FILE = 50 * 1024
+MAX_TOTAL    = 200 * 1024
 
 
 def is_text_file(name: str) -> bool:
@@ -53,7 +54,6 @@ def fmt_size(b: int) -> str:
 
 
 def read_attachment(fm: FileManager, name: str) -> tuple[str, bool]:
-    """Read a file as text, truncating at MAX_PER_FILE. Returns (text, truncated)."""
     raw = fm.read(name)
     truncated = len(raw) > MAX_PER_FILE
     if truncated:
@@ -66,8 +66,6 @@ def read_attachment(fm: FileManager, name: str) -> tuple[str, bool]:
 
 
 def build_attachment_context(fm: FileManager, names: list[str]) -> tuple[str, list[dict]]:
-    """Concatenate selected files into a single context block. Stops at MAX_TOTAL.
-    Returns (context_string, info_per_file)."""
     parts: list[str] = []
     info: list[dict] = []
     total = 0
@@ -92,74 +90,13 @@ def build_attachment_context(fm: FileManager, names: list[str]) -> tuple[str, li
 
 
 # ============================================================
-# model discovery
-# ============================================================
-@st.cache_data(ttl=300, show_spinner="모델 리스트 조회 중…")
-def fetch_models(provider_name: str) -> tuple[list[str], str | None]:
-    try:
-        llm = get_provider(provider_name, model="-")
-        return list(llm.list_models()), None
-    except Exception as e:
-        return [], f"{type(e).__name__}: {e}"
-
-
-# ============================================================
 # sidebar
 # ============================================================
+state = render_sidebar("chat", kinds=["chat-system"])
 fm = FileManager(_bootstrap.UPLOADS_DIR)
 
+# Page-specific tail of the sidebar: attachments + actions
 with st.sidebar:
-    st.markdown("##### 모델 설정")
-    providers = list_providers()
-    provider_name = st.selectbox(
-        "Provider",
-        providers,
-        index=providers.index("ollama") if "ollama" in providers else 0,
-    )
-
-    c1, c2 = st.columns([4, 1])
-    c1.caption("Model")
-    if c2.button("🔄", help="새로고침", use_container_width=True, key="refresh_models"):
-        fetch_models.clear()
-        st.rerun()
-
-    models, err = fetch_models(provider_name)
-    if err:
-        st.warning(f"리스트 조회 실패\n\n```\n{err}\n```")
-        model = st.text_input("Model (수동)", value="", label_visibility="collapsed")
-    elif not models:
-        st.info("사용 가능한 모델이 없습니다.")
-        model = st.text_input("Model (수동)", value="", label_visibility="collapsed")
-    else:
-        key = f"selected_model__{provider_name}"
-        prev = st.session_state.get(key)
-        idx = models.index(prev) if prev in models else 0
-        model = st.selectbox("Model", models, index=idx,
-                             key=f"select_{provider_name}", label_visibility="collapsed")
-        st.session_state[key] = model
-
-    st.divider()
-    st.markdown("##### 프롬프트")
-
-    # Prompt Studio 에서 적용된 system prompt 가 있으면 한 번만 받아서 default 로
-    if "applied_system_prompt" in st.session_state and "chat_system_default" not in st.session_state:
-        st.session_state.chat_system_default = st.session_state.pop("applied_system_prompt")
-        applied_label = st.session_state.pop("applied_persona_label", None)
-        if applied_label:
-            st.markdown(badge(f"✨ {applied_label}", "info"), unsafe_allow_html=True)
-        else:
-            st.markdown(badge("✨ Prompt Studio 에서 적용됨", "info"), unsafe_allow_html=True)
-
-    system = st.text_area(
-        "System prompt",
-        value=st.session_state.get("chat_system_default", "You are a helpful assistant."),
-        height=120,
-        label_visibility="collapsed",
-        key="chat_system_prompt",
-    )
-    st.page_link("pages/6_✨_Prompt_Studio.py", label="✨ Prompt Studio 에서 편집/생성")
-
-    # -------- 📎 첨부 파일 --------
     st.divider()
     st.markdown("##### 📎 첨부 파일")
     all_files = fm.list()
@@ -168,8 +105,10 @@ with st.sidebar:
 
     if not all_files:
         st.caption("Files 페이지에서 업로드한 텍스트 파일을 여기서 선택할 수 있습니다.")
+        attached: list[str] = []
     elif not text_files:
         st.caption(f"업로드된 {len(all_files)}개 파일이 모두 바이너리입니다.")
+        attached = []
     else:
         opts = [f.name for f in text_files]
         labels = {f.name: f"{f.name}  ·  {fmt_size(f.size)}" for f in text_files}
@@ -184,9 +123,8 @@ with st.sidebar:
             st.caption(f"✅ {len(attached)}개 첨부 · 합산 한도 {MAX_TOTAL//1024} KB")
 
     if binary_files:
-        st.caption(f"⚪ 바이너리 {len(binary_files)}개 제외 (PDF·xlsx·이미지 등은 미지원)")
+        st.caption(f"⚪ 바이너리 {len(binary_files)}개 제외")
 
-    # -------- 액션 --------
     st.divider()
     st.markdown("##### 액션")
     c1, c2 = st.columns(2)
@@ -196,10 +134,9 @@ with st.sidebar:
         st.rerun()
 
     has_msgs = bool(st.session_state.get("chat_messages"))
-
     if has_msgs:
         md = f"# Chat — {datetime.now():%Y-%m-%d %H:%M}\n\n"
-        md += f"_provider: `{provider_name}` · model: `{model}`_\n\n"
+        md += f"_endpoint: `{state.endpoint.slug if state.endpoint else '-'}` · model: `{state.model}`_\n\n"
         for m in st.session_state.get("chat_messages", []):
             md += f"## {m['role']}\n\n{m['content']}\n\n"
         c2.download_button(
@@ -209,17 +146,8 @@ with st.sidebar:
             mime="text/markdown",
             use_container_width=True,
         )
-    else:
-        c2.button("💾 .md 저장", disabled=True, use_container_width=True)
-
-    # save to Files folder
-    if has_msgs:
         if st.button("📁 Files 에 저장", use_container_width=True,
-                     help="현재 대화를 Files 폴더에 .md 로 저장 — 다음 대화의 첨부로 재사용 가능"):
-            md = f"# Chat — {datetime.now():%Y-%m-%d %H:%M}\n\n"
-            md += f"_provider: `{provider_name}` · model: `{model}`_\n\n"
-            for m in st.session_state.get("chat_messages", []):
-                md += f"## {m['role']}\n\n{m['content']}\n\n"
+                     help="현재 대화를 Files 폴더에 .md 로 저장"):
             fname = f"chat_{datetime.now():%Y%m%d_%H%M%S}.md"
             try:
                 fm.save(fname, md.encode("utf-8"))
@@ -227,6 +155,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"저장 실패: {e}")
     else:
+        c2.button("💾 .md 저장", disabled=True, use_container_width=True)
         st.button("📁 Files 에 저장", disabled=True, use_container_width=True)
 
 
@@ -240,18 +169,19 @@ if "chat_messages" not in st.session_state:
 # ============================================================
 # main area
 # ============================================================
-attached = st.session_state.get("attached_files", [])
-if attached:
-    chips = " ".join(badge(f"📎 {n}", "info") for n in attached)
+attached_names: list[str] = st.session_state.get("attached_files") or []
+if attached_names:
+    chips = " ".join(badge(f"📎 {n}", "info") for n in attached_names)
     st.markdown(chips, unsafe_allow_html=True)
     st.write("")
 
+endpoint_label = state.endpoint.name if state.endpoint else "엔드포인트 미선택"
 if not st.session_state.chat_messages:
     empty_state(
         icon="💬",
         title="대화를 시작하세요",
-        hint=f"`{provider_name}` · `{model or '모델 미선택'}`"
-        + (f" · 📎 {len(attached)}개 첨부" if attached else ""),
+        hint=f"`{endpoint_label}` · `{state.model or '모델 미선택'}`"
+        + (f" · 📎 {len(attached_names)}개 첨부" if attached_names else ""),
     )
 else:
     for m in st.session_state.chat_messages:
@@ -270,30 +200,33 @@ else:
 # input
 # ============================================================
 user_input = st.chat_input(
-    f"{provider_name} / {model or '모델 미선택'} 에게 보낼 메시지…"
+    f"{endpoint_label} / {state.model or '모델 미선택'} 에게 보낼 메시지…"
 )
 if user_input:
-    if not model:
+    if not state.endpoint:
+        st.error("엔드포인트가 없습니다. Settings 에서 추가하세요.")
+        st.stop()
+    if not state.model:
         st.error("모델을 먼저 선택하세요.")
         st.stop()
 
-    # build attachment context (first send only? always? — always: simple, predictable)
-    attach_ctx, attach_info = build_attachment_context(fm, attached) if attached else ("", [])
+    attach_ctx, _ = (
+        build_attachment_context(fm, attached_names) if attached_names else ("", [])
+    )
 
     st.session_state.chat_messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
     try:
-        llm = get_provider(provider_name, model=model)
+        llm = resolve(state.endpoint, model=state.model)
     except Exception as e:
-        st.error(f"Provider 초기화 실패: {e}")
+        st.error(f"엔드포인트 초기화 실패: {e}")
         st.stop()
 
-    # compose system message + attachment context
     sys_parts: list[str] = []
-    if system.strip():
-        sys_parts.append(system.strip())
+    if state.system_prompt.strip():
+        sys_parts.append(state.system_prompt.strip())
     if attach_ctx:
         sys_parts.append(
             "다음은 사용자가 참조하라고 첨부한 파일들입니다. 필요할 때 인용·활용하세요.\n\n"
