@@ -110,55 +110,65 @@ def _default_model_for(kind: str) -> str | None:
 
 
 def default_endpoints() -> list[Endpoint]:
-    """Build one default Endpoint per registered provider, reading .env state.
+    """Build one default Endpoint per **configured** provider, reading .env state.
 
-    Synthesized fresh each call so .env edits are reflected immediately.
+    Only emits an endpoint when the user has supplied at least one relevant
+    env var for that provider — so unconfigured providers don't clutter the
+    sidebar with empty/broken entries. Users add more via Settings UI.
+
+    Trigger env vars:
+      ollama:    OLLAMA_BASE_URL
+      openai:    OPENAI_API_KEY
+      anthropic: ANTHROPIC_API_KEY
+      litellm:   LITELLM_BASE_URL  or  LITELLM_API_KEY
     """
     out: list[Endpoint] = []
     known = set(list_providers())
-    for kind in PROVIDER_KINDS:
-        if kind not in known:
-            continue
-        if kind == "ollama":
-            out.append(Endpoint(
-                slug="ollama-default",
-                name=_DEFAULT_NAMES["ollama"],
-                provider_kind="ollama",
-                base_url=get_secret("OLLAMA_BASE_URL") or "http://localhost:11434",
-                api_key_env=None,
-                default_model=_default_model_for("ollama"),
-                is_default=True,
-            ))
-        elif kind == "openai":
-            out.append(Endpoint(
-                slug="openai-default",
-                name=_DEFAULT_NAMES["openai"],
-                provider_kind="openai",
-                base_url=None,
-                api_key_env="OPENAI_API_KEY",
-                default_model=_default_model_for("openai"),
-                is_default=True,
-            ))
-        elif kind == "anthropic":
-            out.append(Endpoint(
-                slug="anthropic-default",
-                name=_DEFAULT_NAMES["anthropic"],
-                provider_kind="anthropic",
-                base_url=None,
-                api_key_env="ANTHROPIC_API_KEY",
-                default_model=_default_model_for("anthropic"),
-                is_default=True,
-            ))
-        elif kind == "litellm":
-            out.append(Endpoint(
-                slug="litellm-default",
-                name=_DEFAULT_NAMES["litellm"],
-                provider_kind="litellm",
-                base_url=get_secret("LITELLM_BASE_URL"),
-                api_key_env="LITELLM_API_KEY",
-                default_model=_default_model_for("litellm"),
-                is_default=True,
-            ))
+
+    if "ollama" in known and get_secret("OLLAMA_BASE_URL"):
+        out.append(Endpoint(
+            slug="ollama-default",
+            name=_DEFAULT_NAMES["ollama"],
+            provider_kind="ollama",
+            base_url=get_secret("OLLAMA_BASE_URL"),
+            api_key_env=None,
+            default_model=_default_model_for("ollama"),
+            is_default=True,
+        ))
+
+    if "openai" in known and get_secret("OPENAI_API_KEY"):
+        out.append(Endpoint(
+            slug="openai-default",
+            name=_DEFAULT_NAMES["openai"],
+            provider_kind="openai",
+            base_url=None,
+            api_key_env="OPENAI_API_KEY",
+            default_model=_default_model_for("openai"),
+            is_default=True,
+        ))
+
+    if "anthropic" in known and get_secret("ANTHROPIC_API_KEY"):
+        out.append(Endpoint(
+            slug="anthropic-default",
+            name=_DEFAULT_NAMES["anthropic"],
+            provider_kind="anthropic",
+            base_url=None,
+            api_key_env="ANTHROPIC_API_KEY",
+            default_model=_default_model_for("anthropic"),
+            is_default=True,
+        ))
+
+    if "litellm" in known and (get_secret("LITELLM_BASE_URL") or get_secret("LITELLM_API_KEY")):
+        out.append(Endpoint(
+            slug="litellm-default",
+            name=_DEFAULT_NAMES["litellm"],
+            provider_kind="litellm",
+            base_url=get_secret("LITELLM_BASE_URL"),
+            api_key_env="LITELLM_API_KEY",
+            default_model=_default_model_for("litellm"),
+            is_default=True,
+        ))
+
     return out
 
 
