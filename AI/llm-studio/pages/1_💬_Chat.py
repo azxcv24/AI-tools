@@ -94,19 +94,68 @@ def icon_for(name: str) -> str:
     }.get(e, "📄")
 
 
+def _flatten_multi_cols(columns) -> list[str]:
+    """Flatten pandas MultiIndex columns to underscore-joined strings.
+
+    Drops 'Unnamed: …' fillers that pandas inserts for merged cells, and
+    de-duplicates the result by appending `_2`, `_3`, … so downstream code
+    can always select columns by a single unique name.
+    """
+    raw: list[str] = []
+    for c in columns:
+        if isinstance(c, tuple):
+            parts = [
+                str(x).strip() for x in c
+                if str(x).strip() and not str(x).startswith("Unnamed")
+            ]
+            raw.append("_".join(parts) if parts else "col")
+        else:
+            raw.append(str(c))
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for name in raw:
+        if name in seen:
+            seen[name] += 1
+            out.append(f"{name}_{seen[name]}")
+        else:
+            seen[name] = 1
+            out.append(name)
+    return out
+
+
 def read_tabular_schema(name: str, data: bytes) -> dict:
-    """Return columns / dtypes / cell stats. Used to give the LLM context."""
+    """Return raw rows + single/multi-header column candidates + stats.
+
+    Sending the LLM the *raw* first 15 rows (header=None) lets it spot
+    merged-header patterns, forward-fill needs, and subtotal rows that
+    a single-header view of head() would hide.
+    """
     e = ext_of(name)
     try:
         if e in ("xlsx", "xls"):
-            df_head = pd.read_excel(BytesIO(data), nrows=5)
+            raw = pd.read_excel(BytesIO(data), header=None, nrows=15, dtype=object)
             df_full = pd.read_excel(BytesIO(data), header=None, dtype=object)
+            cols_single = list(pd.read_excel(BytesIO(data), header=0, nrows=3).columns)
+            try:
+                cols_multi = _flatten_multi_cols(
+                    pd.read_excel(BytesIO(data), header=[0, 1], nrows=3).columns
+                )
+            except Exception:
+                cols_multi = []
         elif e == "tsv":
-            df_head = pd.read_csv(BytesIO(data), sep="\t", nrows=5)
-            df_full = pd.read_csv(BytesIO(data), sep="\t", header=None, dtype=object, keep_default_na=False)
+            raw = pd.read_csv(BytesIO(data), sep="\t", header=None, nrows=15,
+                              dtype=object, keep_default_na=False)
+            df_full = pd.read_csv(BytesIO(data), sep="\t", header=None,
+                                  dtype=object, keep_default_na=False)
+            cols_single = list(pd.read_csv(BytesIO(data), sep="\t", nrows=3).columns)
+            cols_multi = []
         else:
-            df_head = pd.read_csv(BytesIO(data), nrows=5)
-            df_full = pd.read_csv(BytesIO(data), header=None, dtype=object, keep_default_na=False)
+            raw = pd.read_csv(BytesIO(data), header=None, nrows=15,
+                              dtype=object, keep_default_na=False)
+            df_full = pd.read_csv(BytesIO(data), header=None,
+                                  dtype=object, keep_default_na=False)
+            cols_single = list(pd.read_csv(BytesIO(data), nrows=3).columns)
+            cols_multi = []
     except Exception as e:  # noqa: F841
         return {"error": str(e)}
 
@@ -120,10 +169,12 @@ def read_tabular_schema(name: str, data: bytes) -> dict:
 
     mask = df_full.map(has_text) if hasattr(df_full, "map") else df_full.applymap(has_text)
     rows_total, cols_total = df_full.shape
+    raw_csv = raw.fillna("").to_csv(index=False, header=False).strip()
+
     return {
-        "columns": list(df_head.columns),
-        "dtypes": {c: str(df_head[c].dtype) for c in df_head.columns},
-        "head": df_head.head(3),
+        "raw_preview": raw_csv,
+        "cols_single_header": [str(c) for c in cols_single],
+        "cols_multi_header": [str(c) for c in cols_multi],
         "rows_total": int(rows_total),
         "cols_total": int(cols_total),
         "rows_with_data": int(mask.any(axis=1).sum()),
@@ -154,14 +205,17 @@ def build_file_context(attachments: dict[str, bytes]) -> str:
             if "error" in info:
                 blocks.append(f"[file: {name}] (읽기 실패: {info['error']})")
                 continue
-            cols = ", ".join(f"`{c}` ({info['dtypes'][c]})" for c in info["columns"])
-            head_str = info["head"].to_csv(index=False).strip()
             blocks.append(
                 f"[file: {name}] (spreadsheet)\n"
                 f"  shape: {info['rows_total']} × {info['cols_total']}  ·  "
-                f"text rows={info['rows_with_data']} cols={info['cols_with_data']} cells={info['cells_with_data']}\n"
-                f"  columns: {cols}\n"
-                f"  head:\n```csv\n{head_str}\n```"
+                f"text rows={info['rows_with_data']} cols={info['cols_with_data']} "
+                f"cells={info['cells_with_data']}\n"
+                f"  columns when read with header=0:\n    {info['cols_single_header']}\n"
+                + (f"  columns when read with header=[0,1] (flattened):\n    "
+                   f"{info['cols_multi_header']}\n"
+                   if info.get('cols_multi_header') else "")
+                + f"  raw first 15 rows (header=None, CSV):\n"
+                  f"```csv\n{info['raw_preview']}\n```"
             )
         elif e in TEXT_EXTS:
             text, truncated = read_text_truncated(data)
@@ -448,18 +502,53 @@ if user_input:
             "이 대화에는 표 형식 파일(엑셀·CSV)이 첨부되어 있다. 사용자가 분석·요약·집계·변환·"
             "병합·필터·정렬 등 **어떤 데이터 작업이라도 요청하면**, 답변은 반드시 다음 형식이어야 한다:\n"
             "\n"
-            "1. 무엇을 할지 한두 문장 요약.\n"
-            "2. 하나의 자족적인 ```python``` 코드 블록.\n"
-            "   - 위에 명시된 파일명으로 현재 디렉토리에서 직접 읽기.\n"
-            "     예: `pd.read_excel('파일명.xlsx')` · 다단 헤더면 `header=[0,1]` 후 컬럼 평탄화.\n"
-            "   - **반드시 결과를 새 파일로 저장**한다. 기본 출력명: `result.xlsx`\n"
-            "     (`df.to_excel('result.xlsx', index=False, engine='openpyxl')`).\n"
-            "   - 두 개 이상이면 `result_<설명>.xlsx` / `.csv` 로 구분.\n"
-            "   - `print()` 으로 행 수·합계 등 짧은 요약 한 줄 출력.\n"
-            "3. 사용자가 명백히 '코드 없이 보여만 줘' 라고 했을 때만 코드 블록 생략 가능 — "
-            "그 외에는 항상 코드+파일 저장이 기본이다.\n"
+            "**규칙**\n"
+            "1. 무엇을 할지 한두 문장 요약 후 하나의 자족적인 ```python``` 코드 블록만.\n"
+            "2. 파일은 위에 명시된 파일명으로 현재 디렉토리에서 직접 읽기.\n"
+            "3. **헤더 판단**: 위 컨텍스트의 `raw first 15 rows` + `columns when read with header=[0,1]` "
+            "결과를 보고 다단 헤더 여부를 판단. 다단이면 아래 헬퍼를 그대로 복사해 사용:\n"
             "\n"
-            "허용된 라이브러리: pandas / numpy / openpyxl / Python 표준 라이브러리만. "
+            "```python\n"
+            "def flatten_cols(cols):\n"
+            "    raw = []\n"
+            "    for c in cols:\n"
+            "        if isinstance(c, tuple):\n"
+            "            parts = [str(x).strip() for x in c\n"
+            "                     if str(x).strip() and not str(x).startswith('Unnamed')]\n"
+            "            raw.append('_'.join(parts) if parts else 'col')\n"
+            "        else:\n"
+            "            raw.append(str(c))\n"
+            "    seen = {}\n"
+            "    out = []\n"
+            "    for n in raw:\n"
+            "        if n in seen:\n"
+            "            seen[n] += 1\n"
+            "            out.append(f'{n}_{seen[n]}')\n"
+            "        else:\n"
+            "            seen[n] = 1\n"
+            "            out.append(n)\n"
+            "    return out\n"
+            "\n"
+            "df = pd.read_excel('파일명.xlsx', header=[0, 1])\n"
+            "df.columns = flatten_cols(df.columns)\n"
+            "```\n"
+            "\n"
+            "   이 헬퍼는 중복 이름을 `_2`, `_3` 으로 자동 dedupe 하므로 그 뒤에 컬럼명을 다시 "
+            "rename 하지 마라. **컨텍스트에 표시된 `cols_multi` 와 동일한 이름이 나온다.**\n"
+            "4. 키 컬럼이 병합된 셀로 인해 NaN 이어지면 `df[키컬럼] = df[키컬럼].ffill()`.\n"
+            "5. `소 계` / `합계` / `총계` / `총합` 같이 텍스트만 든 합계 행은 그룹 연산 전 제외 "
+            "(`df = df[~df[키].astype(str).str.strip().isin(['소 계','합계','총계','총합'])]`).\n"
+            "6. **숫자 컬럼 강제 변환**: 다단 헤더 엑셀은 모든 컬럼이 object 로 들어올 수 있다. "
+            "키 컬럼을 뺀 나머지 후보 컬럼을 `pd.to_numeric(df[col], errors='coerce')` 로 변환한 뒤 "
+            "`select_dtypes(include='number')` 로 집계 대상 컬럼을 잡아라. 그러지 않으면 출력에 "
+            "한두 컬럼만 남게 된다.\n"
+            "7. 그룹 연산 시 키 컬럼의 dtype 이 object 일 수 있으니 `astype(str)` 적절히 사용.\n"
+            "8. **반드시 결과를 새 파일로 저장**: 기본 `result.xlsx` "
+            "(`df.to_excel('result.xlsx', index=False, engine='openpyxl')`).\n"
+            "9. `print()` 으로 행 수·합계 한 줄 요약 출력.\n"
+            "10. 사용자가 명백히 '코드 없이 보여만 줘' 일 때만 코드 생략 가능.\n"
+            "\n"
+            "허용 라이브러리: pandas / numpy / openpyxl / Python 표준 라이브러리만. "
             "네트워크·subprocess·eval/exec·경로 탈출 금지."
         )
     system_combined = "\n\n---\n\n".join(sys_parts)
