@@ -13,18 +13,18 @@ streamlit run app.py
 
 | 파일명 | 페이지 |
 |---|---|
-| `01-landing.png` | 🧪 랜딩 (엔드포인트 상태 4-card + 페이지 카드 7개) |
-| `02-chat.png` | 💬 Chat (사이드바: 엔드포인트·모델·스킬·첨부, 본문 대화) |
-| `03-files.png` | 📁 Files (파일 몇 개 업로드된 상태) |
-| `04-ollama.png` | 🦙 Ollama (설치 모델 + 인기 픽 탭) |
-| `05-excel-agent.png` | 📊 Excel Agent (사이드바 스킬·모델, 구조 분석 단계) |
-| `06-prompt-studio.png` | ✨ Prompt Studio (라이브러리 + 향상 결과) |
-| `07-settings.png` | ⚙️ Settings (📡 연결 지점 4-card + .env 편집) |
-| `08-skills.png` | 🧰 Skills (시드/사용자 스킬 CRUD 페이지) |
+| `01-landing.png` | 🧪 랜딩 (엔드포인트 상태 + 페이지 카드 5개) |
+| `02-chat.png` | 💬 Chat — ChatGPT 스타일 통합 UI (사이드바 + 파일 드롭존 + 채팅 입력) |
+| `03-prompt-studio.png` | ✨ Prompt Studio (페르소나 라이브러리 + 향상기) |
+| `04-skills.png` | 🧰 Skills (스킬 CRUD 목록) |
+| `05-ollama.png` | 🦙 Ollama (설치 모델 + 인기 픽 탭) |
+| `06-settings.png` | ⚙️ Settings (📡 연결 지점 + .env 편집) |
 
-권장 캡처 해상도: 가로 1400~1600px (Retina 캡처면 OK).
+권장 해상도: 1600 × 1100 (playwright 로 자동 캡처 권장 — `/tmp/shoot.py` 참고).
 
 ## 주의
 
-- **API 키 / `.env` 내용이 화면에 보이지 않도록** 캡처 전에 Settings 페이지를 떠나거나 마스킹 확인.
+- **API 키 / `.env` 내용이 화면에 보이지 않도록**:
+  - Settings 페이지는 편집 모드 OFF 상태 캡처 (자동 마스킹됨)
+  - 내부 IP·도메인은 Pillow 후처리로 박스 가림 (`/tmp/redact_v2.py`)
 - 채팅 내용에 개인정보 / 실 데이터 포함되지 않도록.

@@ -12,9 +12,9 @@
 ## 한 줄 요약
 
 ```
-Ollama · OpenAI · Anthropic · LiteLLM Gateway 를 명명된 엔드포인트로 묶고,
-재사용 가능한 스킬(작업 패턴)을 사이드바 드롭다운으로 어디서나 적용,
-엑셀은 LLM 이 구조를 자동 인식해 그룹·집계 코드를 격리 실행한다.
+ChatGPT 스타일 통합 채팅 한 곳에서 파일을 드롭하고 대화하면 — 엑셀은 자동 분석되고,
+LLM 이 만든 pandas 코드는 격리 sandbox 에서 자동 실행되어 결과 파일이 메시지로 돌아온다.
+멀티 provider 엔드포인트(Ollama · OpenAI · Anthropic · LiteLLM)와 재사용 스킬(작업 패턴) 지원.
 ```
 
 ---
@@ -23,17 +23,13 @@ Ollama · OpenAI · Anthropic · LiteLLM Gateway 를 명명된 엔드포인트�
 
 > 스크린샷은 [`docs/screenshots/`](docs/screenshots/). 다시 캡처하려면 [docs/screenshots/README.md](docs/screenshots/README.md) 참고.
 
-| 랜딩 | Chat | Files |
+| 랜딩 | 💬 Chat (ChatGPT 스타일 통합 UI) | ✨ Prompt Studio |
 |---|---|---|
-| ![landing](docs/screenshots/01-landing.png) | ![chat](docs/screenshots/02-chat.png) | ![files](docs/screenshots/03-files.png) |
+| ![landing](docs/screenshots/01-landing.png) | ![chat](docs/screenshots/02-chat.png) | ![prompt](docs/screenshots/03-prompt-studio.png) |
 
-| Ollama | Excel Agent | Prompt Studio |
+| 🧰 Skills | 🦙 Ollama | ⚙️ Settings |
 |---|---|---|
-| ![ollama](docs/screenshots/04-ollama.png) | ![excel](docs/screenshots/05-excel-agent.png) | ![prompt](docs/screenshots/06-prompt-studio.png) |
-
-| Settings (📡 연결 지점) | Skills (🧰 CRUD) |
-|---|---|
-| ![settings](docs/screenshots/07-settings.png) | ![skills](docs/screenshots/08-skills.png) |
+| ![skills](docs/screenshots/04-skills.png) | ![ollama](docs/screenshots/05-ollama.png) | ![settings](docs/screenshots/06-settings.png) |
 
 ---
 
@@ -56,33 +52,23 @@ Ollama · OpenAI · Anthropic · LiteLLM Gateway 를 명명된 엔드포인트�
 - **🧪 테스트**: 한 번 클릭으로 health/`list_models()` 확인
 - Settings 의 ollama 엔드포인트는 `📥 모델 관리` → Ollama 페이지로 deep-link (`?endpoint=<slug>`)
 
-### 💬 Chat — 멀티 엔드포인트 대화
-- 사이드바: 🔌 엔드포인트 → Model 자동 조회(300s 캐시) → 🧰 스킬 → 📝 시스템 프롬프트 → 📎 첨부
-- 스킬 선택 즉시 system prompt 채워짐 — 그 위에 자유 편집 가능
-- 스트리밍 응답 + 응답 후 메트릭(시간·토큰·청크)
-- **📎 파일 첨부** — Files 폴더의 텍스트 파일을 system prompt 끝에 컨텍스트로 합산 (파일당 50KB · 합산 200KB)
-- 대화 → `.md` 다운로드 또는 **Files 폴더에 저장** (다음 대화의 첨부로 재사용)
+### 💬 Chat — ChatGPT-style 통합 UI ⭐ 대규모 개편
+**파일 업로드 · 분석 · 평균/통합 · 결과 다운로드를 단일 채팅에서 끝까지.**
+- 사이드바: 🔌 엔드포인트 → Model 자동 조회(300s 캐시) → 🧰 스킬 → 📝 시스템 프롬프트
+- **📎 인라인 파일 첨부** — 채팅 입력 영역에서 드래그-드롭. Excel·CSV·텍스트 모두 가능
+- **자동 분석** — 엑셀 첨부 시 schema + 행/열 카운트 + dtype 을 LLM 컨텍스트에 자동 주입
+- **Code Interpreter 동작** — 응답에 `python` 코드 블록이 있고 표 형식 파일이 컨텍스트에 있으면 **격리 sandbox 에서 자동 실행** → 신규 파일은 메시지 하단에 다운로드 버튼 + 미리보기로
+- **누적 컨텍스트** — 첨부 파일 + sandbox 출력 파일이 세션 동안 유지되어 후속 메시지 ("방금 result 에서 Seoul 만") 에서 그대로 참조 가능
+- 스트리밍 응답 + 응답 후 메트릭(시간·토큰·청크·sandbox 실행 시간)
+- 대화 → `.md` 다운로드
 
-### 📊 Excel Agent — 구조 자동 인식 → 스킬 적용 → 격리 실행 ⭐ 대규모 개편
-- Files 폴더의 .xlsx/.xls/.csv/.tsv 멀티 선택 + 스키마 미리보기 + 셀 카운터
-- **🔍 구조 분석** (신규): LLM 이 raw 15행 + 단/다단 헤더 후보를 보고 `key_columns`, `year_columns`, `value_columns`, `skip_rows`, `header_rows` 등을 JSON 으로 자동 추론. 결과는 **`폼` 탭 + `JSON` 탭** 양방향 편집
-- **🧰 스킬 적용**: 사이드바 드롭다운에서 `excel-pandas` 스킬 선택 → `{file_list}` · `{schema_json}` · `{task}` 자리표시자 자동 치환 → pandas 코드 생성
-- **subprocess 격리 실행**:
-  - POSIX rlimit: 메모리 · CPU · FD · 코어 덤프 차단
-  - 사용자 조정 타임아웃(5–300s) · 메모리(128–4096MB)
-  - 신선한 임시 디렉토리 + 입력 시드 + 출력 자동 수집
-- **💾 스킬로 저장**: 실행 성공한 작업을 새 스킬로 추출 — 자리표시자가 자동 끼워져 재사용 가능
+> 🛡 **격리 sandbox**: POSIX rlimit(메모리·CPU·FD·코어덤프) + hard timeout + 신선한 임시 디렉토리. 입력 파일만 시드, 출력은 신규 파일 자동 수집.
 
 ### 🦙 Ollama — 로컬·원격 모델 관리
 - 서버 상태 + 헬스 체크 + `?endpoint=<slug>` 로 다중 서버 지원
 - **설치 모델 테이블**: 이름·크기·파라미터·양자화·수정일·🗑️ 삭제
 - **인기 모델 원클릭 Pull** + 직접 입력 탭 — llama3.2 / 3.1, qwen2.5, mistral, gemma2, phi3, deepseek-r1, nomic-embed, mxbai-embed
 - 실시간 진행률: `MB / total · %` 와 status 메시지 streaming
-
-### 📁 Files — 업로드 / 리스트 / 삭제
-- 다중 드래그-드롭 업로드 + 확장자 아이콘 + 다운로드 / 삭제
-- 저장 위치는 gitignored (`AI/llm-studio/data/uploads/`)
-- 경로-안전 `FileManager` — `../` traversal, `/abs`, `\\winpath` 모두 거부
 
 ### ✨ Prompt Studio — 라이브러리 + system prompt 향상기
 - **라이브러리**가 이제 `SkillRegistry.by_kind("chat-system")` 기반 — 시드 8개 + 사용자가 만든 chat-system 스킬이 함께 표시
