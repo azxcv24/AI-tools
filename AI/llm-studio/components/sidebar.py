@@ -99,6 +99,7 @@ def render_sidebar(
     kinds: Sequence[SkillKind] | None = None,
     with_task: bool = False,
     with_limits: bool = False,
+    default_skill_slug: str | None = None,
     default_system_prompt: str = (
         "당신은 한국어/영어 양쪽에 능숙한 데이터 분석 어시스턴트입니다.\n"
         "- 사용자의 언어로 답변하세요 (한국어로 물으면 한국어로, 영어로 물으면 영어로).\n"
@@ -197,6 +198,19 @@ def render_sidebar(
         skill_slug_key = f"sidebar_skill__{page_id}"
         prev_skill_slug = st.session_state.get(skill_slug_key)
         skill_slugs = ["(없음)"] + [s.slug for s in skills]
+
+        # Auto-default: if caller provided a default_skill_slug AND the user
+        # hasn't actively chosen anything else yet (current value is None or
+        # "(없음)"), promote the default. Once the user picks anything
+        # specific, we never override.
+        if (
+            default_skill_slug
+            and default_skill_slug in skill_slugs
+            and prev_skill_slug in (None, "(없음)")
+        ):
+            prev_skill_slug = default_skill_slug
+            st.session_state[skill_slug_key] = default_skill_slug
+
         skill_idx = skill_slugs.index(prev_skill_slug) if prev_skill_slug in skill_slugs else 0
 
         def _fmt_skill(slug: str) -> str:
