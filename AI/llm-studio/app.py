@@ -85,18 +85,14 @@ st.markdown("##### 빠른 시작")
 
 cards = [
     {"icon": "💬", "title": "Chat",          "page": "pages/1_💬_Chat.py",
-     "desc": "대화 + 파일 첨부, `.md` 익스포트 · 사이드바에 스킬 드롭다운"},
-    {"icon": "📁", "title": "Files",         "page": "pages/2_📁_Files.py",
-     "desc": "파일 업로드 · 리스트 · 다운로드 · 삭제"},
-    {"icon": "🦙", "title": "Ollama",        "page": "pages/3_🦙_Ollama.py",
-     "desc": "인기 모델 원클릭 Pull · 설치 관리"},
-    {"icon": "📊", "title": "Excel Agent",   "page": "pages/5_📊_Excel_Agent.py",
-     "desc": "구조 자동 인식 → 스킬로 집계 (격리 실행)"},
-    {"icon": "✨", "title": "Prompt Studio", "page": "pages/6_✨_Prompt_Studio.py",
-     "desc": "라이브러리 + 한 줄 → system prompt 향상"},
-    {"icon": "🧰", "title": "Skills",        "page": "pages/7_🧰_Skills.py",
+     "desc": "파일 드롭 + 자동 엑셀 분석 + 코드 자동 실행 (Code Interpreter 스타일)"},
+    {"icon": "✨", "title": "Prompt Studio", "page": "pages/2_✨_Prompt_Studio.py",
+     "desc": "페르소나 라이브러리 + 한 줄 → system prompt 향상"},
+    {"icon": "🧰", "title": "Skills",        "page": "pages/3_🧰_Skills.py",
      "desc": "재사용 가능한 시스템 프롬프트·작업 템플릿 관리"},
-    {"icon": "⚙️", "title": "Settings",      "page": "pages/4_⚙️_Settings.py",
+    {"icon": "🦙", "title": "Ollama",        "page": "pages/4_🦙_Ollama.py",
+     "desc": "인기 모델 원클릭 Pull · 설치 관리"},
+    {"icon": "⚙️", "title": "Settings",      "page": "pages/5_⚙️_Settings.py",
      "desc": "📡 엔드포인트 + 환경변수 편집"},
 ]
 PER_ROW = 3

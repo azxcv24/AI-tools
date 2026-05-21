@@ -182,7 +182,7 @@ for ep in eps:
                     st.toast(f"❌ {ep.slug}: {msg}", icon="⚠️")
         with c3:
             if ep.provider_kind == "ollama":
-                st.page_link("pages/3_🦙_Ollama.py", label="📥 모델 관리")
+                st.page_link("pages/4_🦙_Ollama.py", label="📥 모델 관리")
         with c4:
             cx, cy = st.columns(2)
             if cx.button(
