@@ -99,7 +99,14 @@ def render_sidebar(
     kinds: Sequence[SkillKind] | None = None,
     with_task: bool = False,
     with_limits: bool = False,
-    default_system_prompt: str = "You are a helpful assistant.",
+    default_system_prompt: str = (
+        "당신은 한국어/영어 양쪽에 능숙한 데이터 분석 어시스턴트입니다.\n"
+        "- 사용자의 언어로 답변하세요 (한국어로 물으면 한국어로, 영어로 물으면 영어로).\n"
+        "- 표 형식 파일(엑셀·CSV)이 첨부되면 자동으로 구조를 분석하고, 사용자가 요청한 "
+        "분석·집계·변환 작업을 수행하는 pandas 코드를 생성한 뒤 결과를 새 파일로 저장합니다.\n"
+        "- 코드 외 설명은 짧고 명확하게. 결과 수치나 핵심 통계는 한 줄 요약으로 강조하세요.\n"
+        "- 추측 대신 데이터에 근거해 답하고, 정보가 부족하면 무엇이 더 필요한지 명시합니다."
+    ),
 ) -> SidebarState:
     """Render the shared sidebar and return the resolved selection."""
     endpoints = _endpoints_for_picker()

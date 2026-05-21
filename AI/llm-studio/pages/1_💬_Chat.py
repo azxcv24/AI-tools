@@ -9,6 +9,7 @@ follow-up message with download / preview.
 import re
 import sys
 import time
+import unicodedata
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -470,13 +471,19 @@ if user_input:
         st.error("모델을 먼저 선택하세요.")
         st.stop()
 
-    # 1) Add freshly uploaded files into session-wide context
+    # 1) Add freshly uploaded files into session-wide context.
+    #    Normalize filenames to NFC — some filesystems (older macOS HFS+,
+    #    certain SMB mounts) hand us NFD-decomposed Korean which renders
+    #    visually identically but breaks LLM token round-trips. Storing as
+    #    NFC means the name we send to the LLM and the name the sandbox
+    #    looks for are always the same shape.
     just_added: list[str] = []
     if new_files:
         for f in new_files:
             data = f.getvalue()
-            st.session_state.chat_attachments[f.name] = data
-            just_added.append(f.name)
+            clean_name = unicodedata.normalize("NFC", f.name)
+            st.session_state.chat_attachments[clean_name] = data
+            just_added.append(clean_name)
 
     # 2) Record user message
     user_msg = {
@@ -517,11 +524,24 @@ if user_input:
             "이 대화에는 표 형식 파일(엑셀·CSV)이 첨부되어 있다. 사용자가 분석·요약·집계·변환·"
             "병합·필터·정렬 등 **어떤 데이터 작업이라도 요청하면**, 답변은 반드시 다음 형식이어야 한다:\n"
             "\n"
+            "**파일명 주의**: 위 컨텍스트의 파일명을 **한 글자도 바꾸지 말 것**. 한글 자모를 "
+            "임의로 다른 글자로 치환하면 FileNotFoundError. 가장 안전한 방법은 디렉토리에서 "
+            "자동 매칭이다:\n"
+            "```python\n"
+            "import os\n"
+            "src = next(f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls', '.csv', '.tsv')))\n"
+            "df = pd.read_excel(src)  # 또는 pd.read_csv(src)\n"
+            "```\n"
+            "\n"
             "**규칙**\n"
             "1. 무엇을 할지 한두 문장 요약 후 하나의 자족적인 ```python``` 코드 블록만.\n"
-            "2. 파일은 위에 명시된 파일명으로 현재 디렉토리에서 직접 읽기.\n"
+            "2. 파일은 위 `src` 패턴 또는 컨텍스트의 정확한 파일명으로 직접 읽기.\n"
             "3. **헤더 판단**: 위 컨텍스트의 `raw first 15 rows` + `columns when read with header=[0,1]` "
-            "결과를 보고 다단 헤더 여부를 판단. 다단이면 아래 헬퍼를 그대로 복사해 사용:\n"
+            "결과를 보고:\n"
+            "   - 첫 1행만 텍스트이고 2행부터 데이터면 → 단일 헤더 (`header=0` 기본).\n"
+            "   - 첫 2행에 걸쳐 카테고리/세부 항목이 분리돼 있으면 → 다단 헤더 (`header=[0,1]`).\n"
+            "   - 첫 0~2행이 제목/메타이고 실제 헤더가 더 아래라면 → `skiprows=N`.\n"
+            "   다단이면 아래 헬퍼를 그대로 복사해 사용 (중복 이름 자동 dedupe):\n"
             "\n"
             "```python\n"
             "def flatten_cols(cols):\n"
@@ -550,18 +570,39 @@ if user_input:
             "\n"
             "   이 헬퍼는 중복 이름을 `_2`, `_3` 으로 자동 dedupe 하므로 그 뒤에 컬럼명을 다시 "
             "rename 하지 마라. **컨텍스트에 표시된 `cols_multi` 와 동일한 이름이 나온다.**\n"
-            "4. 키 컬럼이 병합된 셀로 인해 NaN 이어지면 `df[키컬럼] = df[키컬럼].ffill()`.\n"
-            "5. `소 계` / `합계` / `총계` / `총합` 같이 텍스트만 든 합계 행은 그룹 연산 전 제외 "
-            "(`df = df[~df[키].astype(str).str.strip().isin(['소 계','합계','총계','총합'])]`).\n"
-            "6. **숫자 컬럼 강제 변환**: 다단 헤더 엑셀은 모든 컬럼이 object 로 들어올 수 있다. "
+            "\n"
+            "4. **병합 셀 vs 단순 공란 vs 합계 행** — 세 가지를 raw_preview 패턴으로 구별하라:\n"
+            "   - **병합 셀(merged)**: 어떤 열의 첫 행에만 값이 있고 이어지는 N 행이 빈칸 → "
+            "병합된 카테고리. `df[키컬럼] = df[키컬럼].ffill()` 로 같은 값이 이어지게 채워라.\n"
+            "     예: `비목분류` 열에 '내부인건비' 가 한 번 뜨고 그 아래 빈칸이면, 그 빈칸 행도 "
+            "여전히 '내부인건비' 소속이다.\n"
+            "   - **단순 공란(blank)**: 값 컬럼이 의미상 '데이터 없음' 이면 ffill 하지 말 것. "
+            "그대로 NaN 두고 `sum(skipna=True)` 로 처리.\n"
+            "   - **합계/소계 행**: '소 계', '소계', '합계', '총계', '총합', '계' 같은 텍스트만 "
+            "들고 키 컬럼 일부가 비어있으면 → 데이터가 아닌 요약 행. **ffill 적용 전에** 제외:\n"
+            "     ```python\n"
+            "     summary_terms = ['소 계', '소계', '합계', '총계', '총합', '계']\n"
+            "     for kc in key_cols:\n"
+            "         df = df[~df[kc].astype(str).str.strip().isin(summary_terms)]\n"
+            "     ```\n"
+            "   - **완전 빈 행**: `df = df.dropna(how='all')`.\n"
+            "   - **올바른 순서**: ① dropna(how='all') → ② summary_terms 제외 → ③ 키컬럼 ffill "
+            "→ ④ 숫자 변환 → ⑤ groupby.\n"
+            "\n"
+            "5. **숫자 컬럼 강제 변환**: 다단 헤더 엑셀은 모든 컬럼이 object 로 들어올 수 있다. "
             "키 컬럼을 뺀 나머지 후보 컬럼을 `pd.to_numeric(df[col], errors='coerce')` 로 변환한 뒤 "
-            "`select_dtypes(include='number')` 로 집계 대상 컬럼을 잡아라. 그러지 않으면 출력에 "
-            "한두 컬럼만 남게 된다.\n"
-            "7. 그룹 연산 시 키 컬럼의 dtype 이 object 일 수 있으니 `astype(str)` 적절히 사용.\n"
-            "8. **반드시 결과를 새 파일로 저장**: 기본 `result.xlsx` "
-            "(`df.to_excel('result.xlsx', index=False, engine='openpyxl')`).\n"
-            "9. `print()` 으로 행 수·합계 한 줄 요약 출력.\n"
-            "10. 사용자가 명백히 '코드 없이 보여만 줘' 일 때만 코드 생략 가능.\n"
+            "`select_dtypes(include='number')` 로 집계 대상 컬럼을 잡아라.\n"
+            "\n"
+            "6. **그룹 키 처리**: 키 dtype 이 object 일 수 있으니 `astype(str)`. 정수 코드(예: "
+            "비목 번호 121)는 `pd.to_numeric(... ).astype('Int64')` 또는 `astype(str)` 일관 사용.\n"
+            "\n"
+            "7. **반드시 결과를 새 파일로 저장**: 기본 `result.xlsx` "
+            "(`df.to_excel('result.xlsx', index=False, engine='openpyxl')`). 두 개 이상이면 "
+            "`result_<설명>.xlsx` / `.csv`.\n"
+            "\n"
+            "8. `print()` 으로 행 수·합계 같은 짧은 한 줄 요약 출력.\n"
+            "\n"
+            "9. 사용자가 '코드 없이 보여만 줘' 라고 명시했을 때만 코드 생략 가능.\n"
             "\n"
             "허용 라이브러리: pandas / numpy / openpyxl / Python 표준 라이브러리만. "
             "네트워크·subprocess·eval/exec·경로 탈출 금지."
@@ -627,9 +668,22 @@ if user_input:
     elif code:
         with st.chat_message("assistant"):
             with st.status("🛠️ 격리 환경에서 실행 중…", expanded=True) as status:
+                # Build the sandbox input dict with BOTH the canonical NFC
+                # filename and (if different) the NFD-decomposed form, so
+                # that even if the LLM hallucinated a slightly different
+                # codepoint sequence the file can still be opened.
+                sb_inputs: dict[str, bytes] = {}
+                for n, d in st.session_state.chat_attachments.items():
+                    sb_inputs[n] = d
+                    nfc = unicodedata.normalize("NFC", n)
+                    nfd = unicodedata.normalize("NFD", n)
+                    if nfc != n:
+                        sb_inputs.setdefault(nfc, d)
+                    if nfd != n:
+                        sb_inputs.setdefault(nfd, d)
                 result = run_pandas_code(
                     code=code,
-                    inputs=dict(st.session_state.chat_attachments),
+                    inputs=sb_inputs,
                     timeout_seconds=60,
                     memory_limit_mb=1024,
                 )
