@@ -14,21 +14,19 @@ from .models import Skill
 # Excel — 예실대비표 도메인
 # ============================================================
 
-_EXCEL_BASE_RULES = """\
-너는 한국 정부·연구과제 예실대비표 형식의 엑셀을 다루는 데이터 엔지니어다.
-
-규칙:
-1) 출력은 ```python``` 코드 블록 단 하나. 설명·markdown 펜스 외부 텍스트 금지.
-2) 입력 파일은 현재 작업 디렉토리에 있다. 다단 헤더가 감지(header_rows 길이 ≥ 2)되면
-   pd.read_excel(path, header=list(header_rows)) 사용 후 컬럼을 "_" 로 평탄화하라.
-   예: df.columns = ["_".join([str(x) for x in c if str(x) != 'nan']).strip("_") for c in df.columns]
-3) 키 컬럼은 사용자가 제공한 key_columns. 그룹 합산은
-   groupby(key_columns, dropna=False).sum(numeric_only=True). 평탄화 후 컬럼명이 달라졌으면
-   부분 일치(substring)로 키 컬럼을 다시 찾아 매핑하라.
-4) "합계", "소계", "총계" 등 텍스트 행, nan 키 행, skip_rows 에 지정된 행은 제외하라.
-5) 결과는 지정된 파일명으로 저장하고 print() 로 행 수·총합만 한 줄로 보고.
-6) 외부 라이브러리·네트워크·subprocess·경로 탈출 금지. pandas / numpy / openpyxl 만 사용.
+_EXCEL_BASE_RULES_LEGACY = """\
+(legacy short guide — kept for reference. 새 좁은 시드는 _excel_domain_skill_prompt 로 EXCEL_TABLE_GUIDE + 도메인 규칙을 합쳐 사용.)
 """
+
+
+def _excel_domain_skill_prompt(domain_rules: str) -> str:
+    """Domain-specific Excel skills get the full guide + extra rules.
+
+    좁은 도메인 시드 (비목별 합계, 연차별 총예산 등) 도 EXCEL_TABLE_GUIDE 의
+    평탄화 헬퍼·셀프 체크·양식 보존 가이드를 그대로 받고, 그 뒤에 그 시드 만의
+    추가 규칙(domain_rules) 을 붙인다. 단일 출처 원칙 + 도메인 특화.
+    """
+    return EXCEL_TABLE_GUIDE + "\n\n---\n\n**추가 도메인 규칙**\n" + domain_rules
 
 _EXAMPLE_FILES = (
     "4예실대비표 2.xlsx",
@@ -246,13 +244,17 @@ _EXCEL_SEEDS: list[Skill] = [
         kind="excel-pandas",
         description="비목 번호·이름별로 모든 연차의 예산을 합산해 한 파일로 저장",
         tags=("excel", "budget", "groupby", "ko", "예실"),
-        system_prompt=_EXCEL_BASE_RULES,
+        system_prompt=_excel_domain_skill_prompt(
+            "**도메인**: 한국 정부·연구과제 예실대비표 형식.\n"
+            "**그룹 키**: '비목분류' (상위) + '비용명' 또는 '비용명_2' (하위 — 평탄화 결과 보고 선택).\n"
+            "**합산 대상**: 모든 숫자 컬럼 (pd.to_numeric 변환 후).\n"
+            "**출력 파일명**: `bimok_sum.xlsx` 또는 사용자가 지정한 이름.\n"
+            "여러 파일을 동시에 처리할 때는 같은 비목 번호·이름끼리 합쳐 한 표로 출력한다."
+        ),
         user_prompt_template=(
             "입력 파일: {file_list}\n\n"
-            "감지된 구조:\n```\n{schema_json}\n```\n\n"
-            "작업: 위 파일들을 모두 읽어 key_columns 기준으로 행을 묶고, "
-            "value_columns 의 합계를 계산해 `bimok_sum.xlsx` 로 저장하라.\n"
-            "파일이 여러 개면 같은 비목 번호·이름끼리 합쳐 한 표로 출력한다.\n"
+            "작업: 비목 번호·이름 기준으로 모든 숫자 컬럼을 합산해 bimok_sum.xlsx 로 저장.\n"
+            "그룹별 소계 + 전체 합계 행 포함, 원본 양식 보존.\n"
             "추가 지시: {task}"
         ),
         sample_files=_EXAMPLE_FILES,
@@ -265,13 +267,19 @@ _EXCEL_SEEDS: list[Skill] = [
         kind="excel-pandas",
         description="모든 비목을 합쳐 연차별(1차/2차/…) 총예산 한 행으로 정리",
         tags=("excel", "budget", "yearly", "ko", "예실"),
-        system_prompt=_EXCEL_BASE_RULES,
+        system_prompt=_excel_domain_skill_prompt(
+            "**도메인**: 한국 예실대비표의 연차별 예산 집계.\n"
+            "**연차 컬럼 식별**: 평탄화 결과에서 '계획예산', '실행예산_*', '당년도예산', "
+            "'당해누계' 등 예산 성격의 숫자 컬럼이 곧 연차/시점별 예산. 이 컬럼들을 그대로 "
+            "합산 대상으로 사용 (전체 비목 합산).\n"
+            "**출력 파일명**: `yearly_total.xlsx`.\n"
+            "**구조**: 파일명 + 연차 컬럼들 + 합계 한 행. 여러 파일이면 파일별 한 행씩 + "
+            "마지막에 '총합' 행."
+        ),
         user_prompt_template=(
             "입력 파일: {file_list}\n\n"
-            "감지된 구조:\n```\n{schema_json}\n```\n\n"
-            "작업: year_columns 각각의 합계를 계산해 `yearly_total.xlsx` 로 저장하라.\n"
-            "여러 파일이면 파일별로 한 행을 만들고 마지막에 '총합' 행을 추가한다.\n"
-            "컬럼 순서는 (파일명) + year_columns + 합계.\n"
+            "작업: 모든 비목을 합쳐 연차/시점별 예산 컬럼 각각의 총합을 한 행으로 정리해 "
+            "yearly_total.xlsx 로 저장.\n"
             "추가 지시: {task}"
         ),
         sample_files=_EXAMPLE_FILES,
@@ -284,18 +292,27 @@ _EXCEL_SEEDS: list[Skill] = [
         kind="excel-pandas",
         description="비목별 예산·실적 짝지어 차이·집행률 계산. 80% 미만은 별도 시트",
         tags=("excel", "budget", "variance", "ko", "예실"),
-        system_prompt=(
-            _EXCEL_BASE_RULES
-            + "\n추가 규칙: value_columns 중 '예산' 이 포함된 컬럼과 '실적' 이 포함된 컬럼을 "
-            "쌍으로 묶고, 각 짝마다 `_차이` (실적-예산), `_집행률(%)` (실적/예산*100, "
-            "0 나눗셈은 NaN) 컬럼을 추가하라."
+        system_prompt=_excel_domain_skill_prompt(
+            "**도메인**: 예산 vs 실적 차이 + 집행률 분석.\n"
+            "**짝짓기**: 평탄화 결과에서 이름에 '예산' / '실적' / '집행' / '잔액' 이 포함된 "
+            "컬럼들을 의미 단위로 짝지어 라:\n"
+            "  · '계획예산' ↔ '집행계_합계' (실적)\n"
+            "  · '실행예산_합계' ↔ '집행계_합계'\n"
+            "**계산**: 각 짝마다 `<짝>_차이` (실적-예산), `<짝>_집행률(%)` (실적/예산*100, "
+            "0 분모는 NaN) 컬럼 추가.\n"
+            "**출력**: `budget_vs_actual.xlsx` 의 'Sheet1' 에 전체, '미달' 시트에 집행률 80% "
+            "미만 행만. 다중 시트 저장 패턴:\n"
+            "```python\n"
+            "with pd.ExcelWriter('budget_vs_actual.xlsx', engine='openpyxl') as w:\n"
+            "    final.to_excel(w, sheet_name='Sheet1', index=False)\n"
+            "    final[final['집행률(%)'] < 80].to_excel(w, sheet_name='미달', index=False)\n"
+            "    # w.save() 호출 금지!\n"
+            "```"
         ),
         user_prompt_template=(
             "입력 파일: {file_list}\n\n"
-            "감지된 구조:\n```\n{schema_json}\n```\n\n"
-            "작업: 각 비목에 대해 예산·실적 컬럼을 짝지어 차이·집행률을 계산하고 "
-            "`budget_vs_actual.xlsx` 로 저장하라.\n"
-            "ExcelWriter 로 메인 시트 + 집행률 80% 미만 행만 모은 `미달` 시트, 두 시트를 작성한다.\n"
+            "작업: 비목별로 예산·실적 컬럼을 짝지어 차이/집행률 계산 후 budget_vs_actual.xlsx 로 "
+            "저장. 메인 시트 + '미달' (집행률 80% 미만) 시트, 두 시트.\n"
             "추가 지시: {task}"
         ),
         sample_files=_EXAMPLE_FILES,

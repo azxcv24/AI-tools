@@ -196,6 +196,7 @@ def render_sidebar(
         skills = registry.by_kind(*skill_kinds) if skill_kinds else registry.list()
 
         skill_slug_key = f"sidebar_skill__{page_id}"
+        skill_widget_key = f"sidebar_skill_sel__{page_id}"
         prev_skill_slug = st.session_state.get(skill_slug_key)
         skill_slugs = ["(없음)"] + [s.slug for s in skills]
 
@@ -203,13 +204,21 @@ def render_sidebar(
         # hasn't actively chosen anything else yet (current value is None or
         # "(없음)"), promote the default. Once the user picks anything
         # specific, we never override.
+        #
+        # IMPORTANT: a Streamlit selectbox with `key=...` ignores its `index`
+        # argument once its widget key has a value in session_state. So we
+        # must also seed the *widget* key directly — otherwise the dropdown
+        # would still visually show "(없음)" even though our state thinks
+        # otherwise. See https://docs.streamlit.io/library/api-reference/widgets#stsession_state
         if (
             default_skill_slug
             and default_skill_slug in skill_slugs
             and prev_skill_slug in (None, "(없음)")
+            and st.session_state.get(skill_widget_key) in (None, "(없음)")
         ):
             prev_skill_slug = default_skill_slug
             st.session_state[skill_slug_key] = default_skill_slug
+            st.session_state[skill_widget_key] = default_skill_slug  # critical
 
         skill_idx = skill_slugs.index(prev_skill_slug) if prev_skill_slug in skill_slugs else 0
 
@@ -227,7 +236,7 @@ def render_sidebar(
             skill_slugs,
             index=skill_idx,
             format_func=_fmt_skill,
-            key=f"sidebar_skill_sel__{page_id}",
+            key=skill_widget_key,
             label_visibility="collapsed",
         )
         chosen_skill: Skill | None = (
