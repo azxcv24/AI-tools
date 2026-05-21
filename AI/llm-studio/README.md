@@ -26,15 +26,14 @@ streamlit run app.py
 
 | 페이지 | 기능 |
 |---|---|
-| 💬 Chat            | 사이드바: 엔드포인트·모델·🧰 스킬·시스템 프롬프트·📎 첨부. 본문: 스트리밍 대화 + `.md` 익스포트 |
-| 📁 Files           | 파일 업로드 · 리스트 · 다운로드 · 삭제 (경로-안전 FileManager) |
-| 🦙 Ollama          | 모델 pull(진행률) · 설치 리스트 · 삭제 · `?endpoint=<slug>` 로 다중 서버 |
-| ⚙️ Settings        | **📡 연결 지점 (Endpoints)** + .env 편집(편집 모드 토글, 0600) |
-| 📊 Excel Agent     | 구조 자동 인식 → 스킬 적용 → pandas 코드 → 격리 실행 → 스킬로 저장 |
-| ✨ Prompt Studio   | 라이브러리(=chat-system 스킬) + 한 줄 → system prompt 향상 + 스킬로 저장 |
-| 🧰 Skills          | 시드 13개 + 사용자 스킬 CRUD (kind 필터, 검색, 복제) |
+| 💬 Chat (1)            | ChatGPT-style 통합 UI — 사이드바: 엔드포인트·모델·🧰 스킬·시스템 프롬프트. 본문: 채팅 입력 + 📎 인라인 파일 첨부 → 엑셀/CSV 자동 schema 주입 → LLM 이 ```python``` 응답하면 **격리 sandbox 에서 자동 실행** → 출력 파일 다운로드·미리보기 카드 |
+| ✨ Prompt Studio (2)   | 라이브러리(=chat-system 스킬) + 한 줄 → system prompt 향상 + 💾 스킬로 저장 |
+| 🧰 Skills (3)          | 시드 13개 + 사용자 스킬 CRUD (kind 필터, 검색, 복제) |
+| 🦙 Ollama (4)          | 모델 pull(진행률) · 설치 리스트 · 삭제 · `?endpoint=<slug>` 로 다중 서버 |
+| ⚙️ Settings (5)        | **📡 연결 지점 (Endpoints)** + .env 편집(편집 모드 토글, 0600) |
 
 업로드 파일·사용자 스킬·endpoints.json 은 모두 `AI/llm-studio/data/` 에 저장 (전 경로 gitignored).
+이전 페이지였던 **Files / Excel Agent** 는 Chat 한 곳으로 통합됐습니다 — 파일은 채팅 입력에서 직접 드롭하고, 엑셀 작업은 첨부 + 자연어 요청으로 자동 처리됩니다.
 
 ## 구조
 
@@ -46,13 +45,11 @@ llm-studio/
 │   ├── ui.py                 · header · badge · empty_state · section · sidebar_brand
 │   └── sidebar.py            · render_sidebar(page_id, kinds, with_task, with_limits)
 ├── pages/
-│   ├── 1_💬_Chat.py
-│   ├── 2_📁_Files.py
-│   ├── 3_🦙_Ollama.py
-│   ├── 4_⚙️_Settings.py
-│   ├── 5_📊_Excel_Agent.py
-│   ├── 6_✨_Prompt_Studio.py
-│   └── 7_🧰_Skills.py
+│   ├── 1_💬_Chat.py          · ChatGPT-style 통합 (파일 드롭 + Code Interpreter)
+│   ├── 2_✨_Prompt_Studio.py
+│   ├── 3_🧰_Skills.py
+│   ├── 4_🦙_Ollama.py
+│   └── 5_⚙️_Settings.py
 └── data/                     · uploads · outputs · skills · endpoints.json (gitignored)
 ```
 
@@ -64,15 +61,14 @@ llm-studio/
 from components import render_sidebar
 
 state = render_sidebar(
-    "excel-agent",
-    kinds=["excel-pandas"],   # 사이드바 스킬 드롭다운에 보일 kind
-    with_task=True,           # 🛠 작업 설명 textarea
-    with_limits=True,         # 🔒 타임아웃·메모리 슬라이더
+    "chat",
+    kinds=["chat-system", "excel-pandas"],  # 사이드바 스킬 드롭다운에 보일 kind
 )
 
-# state.endpoint, state.model, state.skill, state.system_prompt, state.task,
-# state.timeout_seconds, state.memory_mb
+# state.endpoint, state.model, state.skill, state.system_prompt
 ```
+
+기본 엔드포인트 선택 순서: 세션에 저장된 직전 선택 → `.env` 의 `DEFAULT_PROVIDER` 가 가리키는 첫 엔드포인트 → 리스트 0번째.
 
 ## 상세 문서
 

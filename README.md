@@ -42,7 +42,7 @@ LLM 이 만든 pandas 코드는 격리 sandbox 에서 자동 실행되어 결과
   - **chat-system 8종**: 8개 페르소나 (연구 보조원 / 코드 리뷰어 / 번역가 / 데이터 분석가 / 기술 문서 작성자 / 면접관 / 교사 / 디자인 멘토)
   - **prompt-enhance 1종**: Prompt Studio 의 향상 메타 프롬프트
 - **사용자 스킬**: `AI/llm-studio/data/skills/<slug>.json` 으로 1파일/1스킬 저장 (시드 slug 와 같으면 사용자 정의가 우선)
-- **사이드바 드롭다운** — Chat / Excel Agent / Prompt Studio 의 사이드바에서 즉시 적용. `kind` 별로 필터링되어 페이지마다 호환되는 스킬만 노출
+- **사이드바 드롭다운** — Chat / Prompt Studio 의 사이드바에서 즉시 적용. `kind` 별로 필터링되어 페이지마다 호환되는 스킬만 노출 (Chat 은 `chat-system` + `excel-pandas` 둘 다)
 - **CRUD + 복제** — `📋 복제` 로 시드를 사용자 스킬로 변환해 자유 편집
 
 ### 📡 Endpoints — 명명된 LLM 연결 ⭐ 핵심 추가
@@ -161,13 +161,11 @@ AI-tools/
 │       │   ├── ui.py           · header · badge · empty_state · sidebar_brand · section
 │       │   └── sidebar.py      · ⭐ 공유 사이드바 (엔드포인트+모델+스킬+시스템 프롬프트)
 │       ├── pages/
-│       │   ├── 1_💬_Chat.py            · Chat (render_sidebar)
-│       │   ├── 2_📁_Files.py           · Files
-│       │   ├── 3_🦙_Ollama.py          · Ollama (?endpoint=slug 지원)
-│       │   ├── 4_⚙️_Settings.py        · 📡 Endpoints + .env 편집
-│       │   ├── 5_📊_Excel_Agent.py     · ⭐ 구조 분석 + 스킬 적용 + 스킬로 저장
-│       │   ├── 6_✨_Prompt_Studio.py    · 라이브러리(=Skill) + 향상 + 스킬로 저장
-│       │   └── 7_🧰_Skills.py          · ⭐ Skill CRUD
+│       │   ├── 1_💬_Chat.py            · ⭐ ChatGPT-style 통합 (파일 드롭 + 자동 분석 + Code Interpreter)
+│       │   ├── 2_✨_Prompt_Studio.py   · 라이브러리(=Skill) + 향상 + 스킬로 저장
+│       │   ├── 3_🧰_Skills.py          · Skill CRUD
+│       │   ├── 4_🦙_Ollama.py          · Ollama (?endpoint=slug 지원)
+│       │   └── 5_⚙️_Settings.py        · 📡 Endpoints + .env 편집
 │       └── data/               · 업로드 · 출력 · skills/*.json · endpoints.json (gitignored)
 │
 └── docs/
@@ -271,10 +269,11 @@ git diff --staged | grep -iE 'api.?key|secret|token|password|sk-[a-z0-9]'
 4. **표시**: UI 에 표시할 땐 항상 마스킹 (`sk-...abcd`)
 5. **사고 대응**: 실수로 커밋 → **즉시 키 무효화** → `git filter-repo` / BFG
 
-### LLM 생성 코드 실행 (Excel Agent)
+### LLM 생성 코드 실행 (Chat 의 Code Interpreter 동작)
 - 부모 process 안에서 절대 `exec()` 안 함
 - 신선한 temp dir + subprocess + POSIX rlimit (메모리/CPU/FD) + hard timeout
 - `subprocess.run` 의 env 를 화이트리스트로 — proxy 변수 제거
+- 첨부된 파일만 시드, 출력은 신규 파일만 자동 수집
 
 ---
 
@@ -297,13 +296,13 @@ git diff --staged | grep -iE 'api.?key|secret|token|password|sk-[a-z0-9]'
 |---|---|
 | Slash command (`/foo`) | **Streamlit 페이지** (사이드바 메뉴) |
 | Skill 의 prompt template | **`shared/skills/`** — `Skill = (system_prompt + user_prompt_template + kind)` 데이터클래스 + JSON 레지스트리 |
-| Skill 의 tool orchestration | **각 페이지의 비즈니스 로직** (Excel Agent 의 구조 분석 → 스킬 템플릿 → LLM → pandas → sandbox 파이프라인) |
+| Skill 의 tool orchestration | **Chat 의 자동 Code Interpreter** — 첨부 파일 schema 자동 주입 + LLM 응답에서 코드 블록 추출 + sandbox 실행 + 출력 파일 수집 |
 | Skill 의 사용자 시동 진입점 | **🧰 Skills 페이지 + 사이드바 드롭다운** — 모든 호환 페이지에서 즉시 적용 |
 | MCP server (외부 도구 노출) | 우리는 직접 노출 X — Streamlit UI 만. **향후 MCP 어댑터** 로 expose 가능 |
 
 ### 구조적 유사성
 
-- **Excel Agent + `excel-pandas` 스킬** 은 본질적으로 Claude Code skill 의 직접 대응: 의도(=스킬) → 구조 분석 → 코드 생성 → sandbox 실행 → 결과. `/excel-merge` 같은 slash command 와 거의 1:1 매핑.
+- **Chat 의 자동 파이프라인 + `excel-pandas` 스킬** 은 본질적으로 Claude Code skill 의 직접 대응: 의도(=스킬) → schema 자동 분석 → 코드 생성 → sandbox 실행 → 결과 파일. `/excel-merge` 같은 slash command 와 거의 1:1 매핑.
 - **`shared/skills/seeds.py`** 의 13개 시드 = Claude Code 의 plugin skill 카탈로그. 사용자가 추가하는 JSON 스킬 = `~/.claude/skills/*.md` 와 같은 위치.
 - **Settings 의 📡 엔드포인트 관리** 는 Claude Code 의 `/config` + provider 설정과 유사 — 사용자 환경을 메타 레벨에서 관리.
 - **`render_template()` 의 자리표시자 치환** (`{task}`, `{file_list}`, `{schema_json}`) 은 Claude Code skill 의 인자 바인딩 메커니즘과 사고방식이 같다.
@@ -320,7 +319,7 @@ git diff --staged | grep -iE 'api.?key|secret|token|password|sk-[a-z0-9]'
 
 ### 시사점
 
-향후 우리 Excel Agent / Prompt Studio 같은 **잘 정의된 워크플로** 를 Claude Code skill 로 포팅해 CLI 사용자도 쓸 수 있게 만들 수 있음. 반대로 우리는 더 시각적이고 비기술 사용자 친화적이라는 강점.
+향후 우리 Chat (Code Interpreter) / Prompt Studio 같은 **잘 정의된 워크플로** 를 Claude Code skill 로 포팅해 CLI 사용자도 쓸 수 있게 만들 수 있음. 반대로 우리는 더 시각적이고 비기술 사용자 친화적이라는 강점.
 
 ---
 

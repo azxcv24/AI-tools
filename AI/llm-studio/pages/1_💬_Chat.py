@@ -196,6 +196,48 @@ def has_executable_intent(attachments: dict[str, bytes]) -> bool:
 
 
 # ============================================================
+# unified file card — used for both input attachments and sandbox outputs
+# ============================================================
+
+def render_file_card(name: str, data: bytes, *, key_prefix: str, expanded: bool = False) -> None:
+    """Render a bordered file card: name + size + download + tabular preview."""
+    with st.container(border=True):
+        c1, c2, c3 = st.columns([4, 2, 2])
+        c1.markdown(f"**{icon_for(name)} `{name}`**")
+        c2.caption(fmt_size(len(data)))
+        c3.download_button(
+            "⬇️ 다운로드",
+            data=data,
+            file_name=name,
+            key=f"{key_prefix}_dl_{name}",
+            use_container_width=True,
+        )
+        if is_tabular(name):
+            try:
+                e = ext_of(name)
+                if e in ("xlsx", "xls"):
+                    dfp = pd.read_excel(BytesIO(data), nrows=30)
+                elif e == "tsv":
+                    dfp = pd.read_csv(BytesIO(data), sep="\t", nrows=30)
+                else:
+                    dfp = pd.read_csv(BytesIO(data), nrows=30)
+                with st.expander(f"👀 미리보기 (상위 30행 · 전체 {len(data):,} bytes)",
+                                 expanded=expanded):
+                    st.dataframe(dfp, use_container_width=True, hide_index=True)
+            except Exception as e:
+                with st.expander("👀 미리보기 (읽기 실패)", expanded=False):
+                    st.caption(f"`{type(e).__name__}: {e}`")
+        elif is_text(name):
+            try:
+                text, truncated = read_text_truncated(data)
+                with st.expander(f"👀 텍스트 미리보기{' (truncated)' if truncated else ''}",
+                                 expanded=False):
+                    st.code(text[:5000], language=ext_of(name) or "text")
+            except Exception:
+                pass
+
+
+# ============================================================
 # session state
 # ============================================================
 if "chat_messages" not in st.session_state:
@@ -219,10 +261,21 @@ with st.sidebar:
     if not atts:
         st.caption("아직 첨부된 파일이 없습니다.")
     else:
+        st.caption(f"{len(atts)}개 · 본문 카드에서 미리보기 / 다운로드")
         for name, data in atts.items():
-            c1, c2 = st.columns([5, 1])
-            c1.markdown(f"{icon_for(name)} `{name}`  ·  {fmt_size(len(data))}")
-            if c2.button("✕", key=f"rm_{name}", help="컨텍스트에서 제거"):
+            c1, c2, c3 = st.columns([5, 1, 1])
+            c1.markdown(f"{icon_for(name)} `{name}`")
+            c1.caption(fmt_size(len(data)))
+            c2.download_button(
+                "⬇️",
+                data=data,
+                file_name=name,
+                key=f"sb_dl_{name}",
+                help="다운로드",
+                use_container_width=True,
+            )
+            if c3.button("✕", key=f"rm_{name}", help="컨텍스트에서 제거",
+                         use_container_width=True):
                 st.session_state.chat_attachments.pop(name, None)
                 st.toast(f"제거: {name}", icon="🗑️")
                 st.rerun()
@@ -277,47 +330,41 @@ if not st.session_state.chat_messages:
         hint="  ·  ".join(hint_parts) + "  ·  파일은 아래 📎 버튼이나 드래그-드롭",
     )
 else:
-    for m in st.session_state.chat_messages:
+    for mi, m in enumerate(st.session_state.chat_messages):
         with st.chat_message(m["role"]):
-            # Show attachments-as-chips for user messages
-            if m.get("new_attachments"):
-                chips = " ".join(
-                    f'<span class="lstudio-badge info">{icon_for(n)} {n}</span>'
-                    for n in m["new_attachments"]
-                )
-                st.markdown(chips, unsafe_allow_html=True)
             st.markdown(m["content"])
-            # Show sandbox output files
+            # Input attachments (user message) — preview cards
+            if m.get("new_attachments"):
+                for att_name in m["new_attachments"]:
+                    att_bytes = st.session_state.chat_attachments.get(att_name)
+                    if att_bytes is None:
+                        st.caption(f"📎 `{att_name}` (세션에서 제거됨)")
+                        continue
+                    render_file_card(
+                        att_name, att_bytes,
+                        key_prefix=f"hist_{mi}_in",
+                        expanded=False,
+                    )
+            # Sandbox output files (assistant message)
             if m.get("new_outputs"):
                 for out_name in m["new_outputs"]:
                     out_bytes = st.session_state.chat_attachments.get(out_name)
                     if out_bytes is None:
                         continue
-                    with st.container(border=True):
-                        c1, c2, c3 = st.columns([4, 2, 2])
-                        c1.markdown(f"**{icon_for(out_name)} `{out_name}`**")
-                        c2.caption(f"{fmt_size(len(out_bytes))}")
-                        c3.download_button(
-                            "⬇️ 다운로드",
-                            data=out_bytes,
-                            file_name=out_name,
-                            key=f"dl_{m.get('id', id(m))}_{out_name}",
-                            use_container_width=True,
-                        )
-                        # preview if tabular
-                        if is_tabular(out_name):
-                            try:
-                                e = ext_of(out_name)
-                                if e in ("xlsx", "xls"):
-                                    dfp = pd.read_excel(BytesIO(out_bytes), nrows=20)
-                                elif e == "tsv":
-                                    dfp = pd.read_csv(BytesIO(out_bytes), sep="\t", nrows=20)
-                                else:
-                                    dfp = pd.read_csv(BytesIO(out_bytes), nrows=20)
-                                with st.expander("👀 미리보기 (상위 20행)", expanded=False):
-                                    st.dataframe(dfp, use_container_width=True, hide_index=True)
-                            except Exception:
-                                pass
+                    render_file_card(
+                        out_name, out_bytes,
+                        key_prefix=f"hist_{mi}_out",
+                        expanded=False,
+                    )
+            # Sandbox status/notes
+            if m.get("sandbox_note"):
+                st.caption(f"🛠️ {m['sandbox_note']}")
+            if m.get("sandbox_stdout"):
+                with st.expander("📤 stdout", expanded=False):
+                    st.code(m["sandbox_stdout"], language="text")
+            if m.get("sandbox_stderr"):
+                with st.expander("⚠️ stderr", expanded=False):
+                    st.code(m["sandbox_stderr"], language="text")
 
     stats = st.session_state.get("last_stats")
     if stats:
@@ -371,13 +418,16 @@ if user_input:
     st.session_state.chat_messages.append(user_msg)
 
     with st.chat_message("user"):
-        if just_added:
-            chips = " ".join(
-                f'<span class="lstudio-badge info">{icon_for(n)} {n}</span>'
-                for n in just_added
-            )
-            st.markdown(chips, unsafe_allow_html=True)
         st.markdown(user_input)
+        if just_added:
+            for att_name in just_added:
+                att_bytes = st.session_state.chat_attachments.get(att_name)
+                if att_bytes is not None:
+                    render_file_card(
+                        att_name, att_bytes,
+                        key_prefix=f"new_user_{len(st.session_state.chat_messages)}",
+                        expanded=True,
+                    )
 
     # 3) Build LLM messages
     try:
@@ -395,11 +445,22 @@ if user_input:
     # If tabular files are present, nudge the LLM toward executable pandas code.
     if has_executable_intent(st.session_state.chat_attachments):
         sys_parts.append(
-            "사용자가 데이터 처리·집계·변환을 요청하면, 한 블록의 자족적인 ```python``` 코드를 작성하세요. "
-            "현재 디렉토리에서 위에 명시된 파일명으로 직접 읽고, 결과는 같은 디렉토리에 새 파일로 저장 "
-            "(예: `result.xlsx` → `df.to_excel('result.xlsx', index=False, engine='openpyxl')`). "
-            "pandas / numpy / openpyxl / Python 표준 라이브러리만 사용. "
-            "네트워크·subprocess·eval/exec 금지. 코드 외의 설명은 코드 블록 앞·뒤에 짧게만."
+            "이 대화에는 표 형식 파일(엑셀·CSV)이 첨부되어 있다. 사용자가 분석·요약·집계·변환·"
+            "병합·필터·정렬 등 **어떤 데이터 작업이라도 요청하면**, 답변은 반드시 다음 형식이어야 한다:\n"
+            "\n"
+            "1. 무엇을 할지 한두 문장 요약.\n"
+            "2. 하나의 자족적인 ```python``` 코드 블록.\n"
+            "   - 위에 명시된 파일명으로 현재 디렉토리에서 직접 읽기.\n"
+            "     예: `pd.read_excel('파일명.xlsx')` · 다단 헤더면 `header=[0,1]` 후 컬럼 평탄화.\n"
+            "   - **반드시 결과를 새 파일로 저장**한다. 기본 출력명: `result.xlsx`\n"
+            "     (`df.to_excel('result.xlsx', index=False, engine='openpyxl')`).\n"
+            "   - 두 개 이상이면 `result_<설명>.xlsx` / `.csv` 로 구분.\n"
+            "   - `print()` 으로 행 수·합계 등 짧은 요약 한 줄 출력.\n"
+            "3. 사용자가 명백히 '코드 없이 보여만 줘' 라고 했을 때만 코드 블록 생략 가능 — "
+            "그 외에는 항상 코드+파일 저장이 기본이다.\n"
+            "\n"
+            "허용된 라이브러리: pandas / numpy / openpyxl / Python 표준 라이브러리만. "
+            "네트워크·subprocess·eval/exec·경로 탈출 금지."
         )
     system_combined = "\n\n---\n\n".join(sys_parts)
 
@@ -433,9 +494,22 @@ if user_input:
     st.session_state.chat_messages.append(assistant_msg)
 
     # 5) Auto sandbox execution (Code Interpreter behavior)
-    code = extract_code(full) if has_executable_intent(st.session_state.chat_attachments) else None
+    tabular_present = has_executable_intent(st.session_state.chat_attachments)
+    code = extract_code(full) if tabular_present else None
     sandbox_elapsed: float | None = None
-    if code:
+
+    if tabular_present and not code:
+        # LLM gave only prose — explain why no result card appears.
+        note = (
+            "표 파일이 첨부돼 있지만 응답에 ```python``` 코드 블록이 없어 sandbox 실행을 건너뛰었습니다. "
+            "결과 파일을 받으려면 '결과 엑셀로 저장해줘' / '비목별 합산 해서 result.xlsx 로 만들어줘' "
+            "같이 명시적으로 요청하세요."
+        )
+        assistant_msg["sandbox_note"] = note
+        with st.chat_message("assistant"):
+            st.info(f"ℹ️ {note}")
+
+    elif code:
         with st.chat_message("assistant"):
             with st.status("🛠️ 격리 환경에서 실행 중…", expanded=True) as status:
                 result = run_pandas_code(
@@ -445,11 +519,20 @@ if user_input:
                     memory_limit_mb=1024,
                 )
                 sandbox_elapsed = result.elapsed
-                if result.ok:
+
+                # ----- status header -----
+                if result.ok and result.outputs:
                     status.update(
-                        label=f"✅ 실행 완료 ({result.elapsed:.2f}s, 신규 파일 {len(result.outputs)}개)",
+                        label=f"✅ 실행 완료 — {result.elapsed:.2f}s · 신규 파일 {len(result.outputs)}개",
                         state="complete",
-                        expanded=False,
+                        expanded=True,
+                    )
+                elif result.ok and not result.outputs:
+                    status.update(
+                        label=f"⚠️ 실행 성공했지만 신규 파일이 없음 ({result.elapsed:.2f}s) "
+                              f"— `to_excel` / `to_csv` 호출이 누락된 듯",
+                        state="complete",
+                        expanded=True,
                     )
                 else:
                     status.update(
@@ -457,45 +540,45 @@ if user_input:
                         state="error",
                         expanded=True,
                     )
+
+                # ----- stdout / stderr -----
                 if result.stdout.strip():
+                    st.markdown("**stdout**")
                     st.code(result.stdout, language="text")
                 if result.stderr.strip():
+                    st.markdown("**stderr**")
                     st.code(result.stderr, language="text")
+                if result.ok and not result.outputs and not result.stdout.strip():
+                    st.caption(
+                        "코드는 정상 종료됐는데 표준 출력도 새 파일도 없어요. "
+                        "다음 메시지에서 '결과를 result.xlsx 로 저장해줘' 등으로 다시 요청하세요."
+                    )
 
-            # Stash new outputs into session attachments + record on assistant msg
+            # ----- persist into assistant msg for history replay -----
+            if result.stdout.strip():
+                assistant_msg["sandbox_stdout"] = result.stdout
+            if result.stderr.strip():
+                assistant_msg["sandbox_stderr"] = result.stderr
+            if not result.ok:
+                assistant_msg["sandbox_note"] = (
+                    f"실행 실패: {result.error or 'returncode='+str(result.return_code)}"
+                )
+
+            # ----- stash new outputs + render cards -----
             new_outs: list[str] = []
             for name, data in result.outputs.items():
                 st.session_state.chat_attachments[name] = data
                 new_outs.append(name)
             if new_outs:
                 assistant_msg["new_outputs"] = new_outs
-                # show each output file inline
+                st.markdown("**📦 생성된 파일**")
                 for out_name in new_outs:
                     out_bytes = st.session_state.chat_attachments[out_name]
-                    with st.container(border=True):
-                        c1, c2, c3 = st.columns([4, 2, 2])
-                        c1.markdown(f"**{icon_for(out_name)} `{out_name}`**")
-                        c2.caption(f"{fmt_size(len(out_bytes))}")
-                        c3.download_button(
-                            "⬇️ 다운로드",
-                            data=out_bytes,
-                            file_name=out_name,
-                            key=f"dl_new_{out_name}",
-                            use_container_width=True,
-                        )
-                        if is_tabular(out_name):
-                            try:
-                                e = ext_of(out_name)
-                                if e in ("xlsx", "xls"):
-                                    dfp = pd.read_excel(BytesIO(out_bytes), nrows=20)
-                                elif e == "tsv":
-                                    dfp = pd.read_csv(BytesIO(out_bytes), sep="\t", nrows=20)
-                                else:
-                                    dfp = pd.read_csv(BytesIO(out_bytes), nrows=20)
-                                with st.expander("👀 미리보기 (상위 20행)", expanded=True):
-                                    st.dataframe(dfp, use_container_width=True, hide_index=True)
-                            except Exception:
-                                pass
+                    render_file_card(
+                        out_name, out_bytes,
+                        key_prefix=f"new_out_{len(st.session_state.chat_messages)}",
+                        expanded=True,
+                    )
 
     st.session_state.last_stats = {
         "elapsed": elapsed,
