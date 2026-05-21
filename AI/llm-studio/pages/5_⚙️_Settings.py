@@ -13,6 +13,7 @@ from shared.llm import (  # noqa: E402
     get_endpoints,
     has_api_key,
     list_providers,
+    resolve,
     test_connection,
 )
 from shared.llm.config import (  # noqa: E402
@@ -186,7 +187,15 @@ for ep in eps:
                     st.toast(f"❌ {ep.slug}: {msg}", icon="⚠️")
         with c3:
             if ep.provider_kind == "ollama":
-                st.page_link("pages/4_🦙_Ollama.py", label="📥 모델 관리")
+                if st.button(
+                    "📥 모델 풀",
+                    key=f"pull_dlg_{ep.slug}",
+                    use_container_width=True,
+                    help="이 엔드포인트에 직접 모델 다운로드",
+                ):
+                    st.session_state["ollama_pull_slug"] = ep.slug
+                    st.session_state["show_ollama_pull_dialog"] = True
+                st.page_link("pages/4_🦙_Ollama.py", label="전체 관리 →")
         with c4:
             cx, cy = st.columns(2)
             if cx.button(
@@ -409,6 +418,118 @@ for group in GROUPS:
             render_group_edit(group, form_key=f"form_{group['title']}")
         else:
             render_group_readonly(group)
+
+
+# ============================================================
+# Ollama 모델 풀 다이얼로그 (Settings 안에서 직접 다운로드)
+# ============================================================
+_POPULAR_OLLAMA = [
+    ("llama3.2:1b",      "1.3GB", "Llama 3.2 — 초경량"),
+    ("llama3.2:3b",      "2.0GB", "Llama 3.2 — 균형형 (추천 시작점)"),
+    ("llama3.1:8b",      "4.7GB", "Llama 3.1 — 표준 사이즈"),
+    ("qwen2.5:7b",       "4.7GB", "Qwen 2.5 — 다국어 우수"),
+    ("mistral:7b",       "4.4GB", "Mistral — 코드 강점"),
+    ("gemma2:2b",        "1.6GB", "Google Gemma 2"),
+    ("phi3:mini",        "2.3GB", "Microsoft Phi-3 Mini"),
+    ("deepseek-r1:7b",   "4.7GB", "DeepSeek R1 — 추론 강화"),
+    ("nomic-embed-text", "274MB", "Nomic — 일반 임베딩"),
+]
+
+
+def _fmt_bytes(b: float) -> str:
+    if b <= 0:
+        return "-"
+    for unit in ("B", "KB", "MB", "GB"):
+        if b < 1024 or unit == "GB":
+            return f"{b:.1f} {unit}" if unit != "B" else f"{b:.0f} {unit}"
+        b /= 1024
+    return f"{b:.1f} TB"
+
+
+@st.dialog("📥 Ollama 모델 풀")
+def ollama_pull_dialog():
+    slug = st.session_state.get("ollama_pull_slug")
+    ep = endpoints_reg.get(slug) if slug else None
+    if ep is None or ep.provider_kind != "ollama":
+        st.error("Ollama 엔드포인트가 선택되지 않았습니다.")
+        return
+
+    st.caption(
+        f"엔드포인트: **{ep.icon} {ep.name}** · `{ep.base_url}` — "
+        "원클릭으로 받거나 직접 모델명을 입력하세요."
+    )
+
+    # ----- popular picks -----
+    try:
+        provider = resolve(ep, model="-")
+        installed = {m["name"] for m in provider.list_installed()}
+    except Exception as e:
+        provider = None
+        installed = set()
+        st.warning(f"서버 연결 실패: {type(e).__name__}: {e}")
+
+    st.markdown("**인기 모델**")
+    for name, size, desc in _POPULAR_OLLAMA:
+        with st.container(border=True):
+            cc1, cc2, cc3, cc4 = st.columns([3, 1, 4, 1.5])
+            cc1.markdown(f"`{name}`")
+            cc2.markdown(badge(size, "info"), unsafe_allow_html=True)
+            cc3.caption(desc)
+            if name in installed:
+                cc4.markdown(badge("✅ 설치됨", "ok"), unsafe_allow_html=True)
+            else:
+                if cc4.button("⬇️ Pull", key=f"settings_pull_{name}",
+                              use_container_width=True, disabled=provider is None):
+                    st.session_state["_ollama_pull_target"] = name
+                    st.rerun()
+
+    st.divider()
+    st.markdown("**직접 입력**")
+    with st.form("ollama_manual_pull"):
+        manual = st.text_input(
+            "모델 이름",
+            placeholder="예: llama3.1:70b, qwen2.5:14b, 사용자/모델명 …",
+        )
+        submitted = st.form_submit_button("⬇️ Pull", use_container_width=True)
+    if submitted and manual.strip():
+        st.session_state["_ollama_pull_target"] = manual.strip()
+        st.rerun()
+
+    # ----- run pull (single click per rerun) -----
+    target = st.session_state.pop("_ollama_pull_target", None)
+    if target and provider is not None:
+        with st.status(f"📥 `{target}` 다운로드 중…", expanded=True) as status:
+            progress = st.progress(0.0)
+            detail = st.empty()
+            try:
+                for evt in provider.pull(target):
+                    s = evt.get("status", "")
+                    total = evt.get("total")
+                    completed = evt.get("completed")
+                    if total and completed:
+                        frac = min(completed / total, 1.0)
+                        progress.progress(frac)
+                        detail.write(
+                            f"`{s}` · {_fmt_bytes(completed)} / "
+                            f"{_fmt_bytes(total)} · {frac*100:.1f}%"
+                        )
+                    else:
+                        detail.write(f"`{s}`")
+                progress.progress(1.0)
+                status.update(label=f"✅ `{target}` 완료", state="complete", expanded=False)
+                st.toast(f"📥 `{target}` 설치됨", icon="🦙")
+            except Exception as e:
+                status.update(label=f"❌ pull 실패: {e}", state="error")
+
+    st.divider()
+    if st.button("닫기", use_container_width=True):
+        st.session_state.pop("show_ollama_pull_dialog", None)
+        st.session_state.pop("ollama_pull_slug", None)
+        st.rerun()
+
+
+if st.session_state.get("show_ollama_pull_dialog"):
+    ollama_pull_dialog()
 
 
 # ============================================================

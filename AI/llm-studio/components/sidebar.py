@@ -250,6 +250,67 @@ def render_sidebar(
         )
         st.session_state[sys_key] = system_prompt
 
+        # ----- ⭐ Prompt slots (3 favorites, page-scoped) -----
+        slots_key = f"sidebar_prompt_slots__{page_id}"
+        slots = st.session_state.setdefault(
+            slots_key, [{"label": "", "content": ""} for _ in range(3)]
+        )
+        st.markdown("##### ⭐ 프롬프트 즐겨찾기")
+        st.caption("자주 쓰는 시스템 프롬프트 3개를 슬롯에 저장 / 한 번에 불러오기")
+        for i, slot in enumerate(slots, start=1):
+            with st.container(border=True):
+                has_content = bool(slot.get("content", "").strip())
+                label_display = slot.get("label") or (
+                    f"#{i} (비어있음)" if not has_content else f"#{i} 저장됨"
+                )
+                st.caption(f"**{label_display}**")
+                c_load, c_save, c_clear = st.columns(3)
+                if c_load.button(
+                    "📥",
+                    key=f"slot_load__{page_id}__{i}",
+                    use_container_width=True,
+                    disabled=not has_content,
+                    help="이 슬롯의 프롬프트를 위 시스템 프롬프트에 적용",
+                ):
+                    st.session_state[sys_key] = slot["content"]
+                    st.toast(f"📥 슬롯 #{i} 적용", icon="⭐")
+                    st.rerun()
+                if c_save.button(
+                    "💾",
+                    key=f"slot_save__{page_id}__{i}",
+                    use_container_width=True,
+                    disabled=not system_prompt.strip(),
+                    help="현재 시스템 프롬프트를 이 슬롯에 저장",
+                ):
+                    # If the user has typed a custom label via the input below,
+                    # honor it; otherwise auto-label from the first 24 chars.
+                    auto_label = (system_prompt.strip().splitlines()[0])[:24]
+                    slot["label"] = slot.get("label") or auto_label
+                    slot["content"] = system_prompt
+                    st.toast(f"💾 슬롯 #{i} 저장", icon="⭐")
+                    st.rerun()
+                if c_clear.button(
+                    "🗑️",
+                    key=f"slot_clear__{page_id}__{i}",
+                    use_container_width=True,
+                    disabled=not has_content,
+                    help="슬롯 비우기",
+                ):
+                    slot["label"] = ""
+                    slot["content"] = ""
+                    st.toast(f"🗑️ 슬롯 #{i} 비움", icon="⭐")
+                    st.rerun()
+                if has_content:
+                    new_label = st.text_input(
+                        "라벨",
+                        value=slot.get("label", ""),
+                        key=f"slot_label__{page_id}__{i}",
+                        label_visibility="collapsed",
+                        placeholder="짧은 라벨 (선택)",
+                    )
+                    if new_label != slot.get("label"):
+                        slot["label"] = new_label
+
         # ----- 🛠 Task (Excel only) -----
         task = ""
         if with_task:
