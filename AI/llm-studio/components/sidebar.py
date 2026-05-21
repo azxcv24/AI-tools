@@ -25,6 +25,7 @@ from shared.llm import (
     get_endpoints,
     resolve,
 )
+from shared.llm.config import get_secret
 from shared.skills import Skill, SkillKind, get_registry
 
 from .ui import badge
@@ -113,7 +114,16 @@ def render_sidebar(
         ep_key = f"sidebar_endpoint__{page_id}"
         prev_slug = st.session_state.get(ep_key)
         ep_slugs = [e.slug for e in endpoints]
-        ep_idx = ep_slugs.index(prev_slug) if prev_slug in ep_slugs else 0
+        if prev_slug in ep_slugs:
+            ep_idx = ep_slugs.index(prev_slug)
+        else:
+            # First-load default: prefer DEFAULT_PROVIDER (.env), else first endpoint
+            default_kind = (get_secret("DEFAULT_PROVIDER") or "").strip()
+            preferred = next(
+                (i for i, e in enumerate(endpoints) if e.provider_kind == default_kind),
+                None,
+            ) if default_kind else None
+            ep_idx = preferred if preferred is not None else 0
         chosen_slug = st.selectbox(
             "Endpoint",
             ep_slugs,

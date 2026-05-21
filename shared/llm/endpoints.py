@@ -97,6 +97,18 @@ class Endpoint:
 # Default endpoints — synthesized from .env (never written to disk)
 # ============================================================
 
+def _default_model_for(kind: str) -> str | None:
+    """Resolve default model for a provider kind.
+
+    Precedence:
+      1. `<KIND>_DEFAULT_MODEL` env var (e.g. LITELLM_DEFAULT_MODEL)
+      2. Global `DEFAULT_MODEL` env var (fallback for all providers)
+      3. None
+    """
+    specific = get_secret(f"{kind.upper()}_DEFAULT_MODEL")
+    return specific or get_secret("DEFAULT_MODEL")
+
+
 def default_endpoints() -> list[Endpoint]:
     """Build one default Endpoint per registered provider, reading .env state.
 
@@ -114,7 +126,7 @@ def default_endpoints() -> list[Endpoint]:
                 provider_kind="ollama",
                 base_url=get_secret("OLLAMA_BASE_URL") or "http://localhost:11434",
                 api_key_env=None,
-                default_model=get_secret("DEFAULT_MODEL"),
+                default_model=_default_model_for("ollama"),
                 is_default=True,
             ))
         elif kind == "openai":
@@ -124,7 +136,7 @@ def default_endpoints() -> list[Endpoint]:
                 provider_kind="openai",
                 base_url=None,
                 api_key_env="OPENAI_API_KEY",
-                default_model=get_secret("DEFAULT_MODEL"),
+                default_model=_default_model_for("openai"),
                 is_default=True,
             ))
         elif kind == "anthropic":
@@ -134,7 +146,7 @@ def default_endpoints() -> list[Endpoint]:
                 provider_kind="anthropic",
                 base_url=None,
                 api_key_env="ANTHROPIC_API_KEY",
-                default_model=get_secret("DEFAULT_MODEL"),
+                default_model=_default_model_for("anthropic"),
                 is_default=True,
             ))
         elif kind == "litellm":
@@ -144,7 +156,7 @@ def default_endpoints() -> list[Endpoint]:
                 provider_kind="litellm",
                 base_url=get_secret("LITELLM_BASE_URL"),
                 api_key_env="LITELLM_API_KEY",
-                default_model=get_secret("DEFAULT_MODEL"),
+                default_model=_default_model_for("litellm"),
                 is_default=True,
             ))
     return out

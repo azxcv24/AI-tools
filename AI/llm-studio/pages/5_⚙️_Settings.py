@@ -74,8 +74,12 @@ GROUPS = [
     {
         "title": "🔧 앱 기본값",
         "items": [
-            ("DEFAULT_PROVIDER", "public"),
-            ("DEFAULT_MODEL",    "public"),
+            ("DEFAULT_PROVIDER",        "public"),
+            ("DEFAULT_MODEL",           "public"),
+            ("OLLAMA_DEFAULT_MODEL",    "public"),
+            ("OPENAI_DEFAULT_MODEL",    "public"),
+            ("ANTHROPIC_DEFAULT_MODEL", "public"),
+            ("LITELLM_DEFAULT_MODEL",   "public"),
         ],
     },
 ]
