@@ -37,12 +37,14 @@ LLM 이 만든 pandas 코드는 격리 sandbox 에서 자동 실행되어 결과
 
 ### 🧰 Skills — 재사용 가능한 작업 단위 ⭐ 핵심 추가
 - **`Skill = (system prompt + user prompt template + target page)`** — Persona 의 확장 개념
-- **13개 시드 내장** (모두 `readonly=True`):
-  - **Excel 4종**: 🔍 구조 자동 분석 · 📋 비목별 합계 · 📅 연차별 총예산 합산 · 📉 예산 vs 실적 차이 분석
+- **14개 시드 내장** (모두 `readonly=True`):
+  - **🤖 `excel-default`** ⭐ — Chat 에 엑셀 첨부 시 자동 기본 선택. 다단 헤더 자동 인식 · 병합/공란/합계 행 구분 · 그룹 소계 + 합계 + 원본 양식 보존 (`EXCEL_TABLE_GUIDE` 5198자 단일 출처)
+  - **Excel 도메인 4종**: 🔍 구조 자동 분석 · 📋 비목별 합계 · 📅 연차별 총예산 합산 · 📉 예산 vs 실적 차이 분석
   - **chat-system 8종**: 8개 페르소나 (연구 보조원 / 코드 리뷰어 / 번역가 / 데이터 분석가 / 기술 문서 작성자 / 면접관 / 교사 / 디자인 멘토)
   - **prompt-enhance 1종**: Prompt Studio 의 향상 메타 프롬프트
 - **사용자 스킬**: `AI/llm-studio/data/skills/<slug>.json` 으로 1파일/1스킬 저장 (시드 slug 와 같으면 사용자 정의가 우선)
 - **사이드바 드롭다운** — Chat / Prompt Studio 의 사이드바에서 즉시 적용. `kind` 별로 필터링되어 페이지마다 호환되는 스킬만 노출 (Chat 은 `chat-system` + `excel-pandas` 둘 다)
+- **자동 기본 선택** — Chat 에 엑셀/CSV 첨부 시 `excel-default` 스킬이 사이드바에 자동 선택되어 시스템 프롬프트가 채워짐 (사용자가 다른 것을 명시 선택하면 그 선택 우선)
 - **CRUD + 복제** — `📋 복제` 로 시드를 사용자 스킬로 변환해 자유 편집
 
 ### 📡 Endpoints — 명명된 LLM 연결 ⭐ 핵심 추가
@@ -58,6 +60,7 @@ LLM 이 만든 pandas 코드는 격리 sandbox 에서 자동 실행되어 결과
 - **📎 인라인 파일 첨부** — 채팅 입력 영역에서 드래그-드롭. Excel·CSV·텍스트 모두 가능
 - **자동 분석** — 엑셀 첨부 시 schema + 행/열 카운트 + dtype 을 LLM 컨텍스트에 자동 주입
 - **Code Interpreter 동작** — 응답에 `python` 코드 블록이 있고 표 형식 파일이 컨텍스트에 있으면 **격리 sandbox 에서 자동 실행** → 신규 파일은 메시지 하단에 다운로드 버튼 + 미리보기로
+- **원본 양식 보존 출력** — `excel-default` 스킬의 시스템 프롬프트가 LLM 에게 다단 헤더 복원 · 그룹별 소계 행 · 마지막 합계 행 · 천 단위 콤마 포맷까지 강제. 입력 엑셀과 같은 양식의 새 파일을 받게 됨.
 - **누적 컨텍스트** — 첨부 파일 + sandbox 출력 파일이 세션 동안 유지되어 후속 메시지 ("방금 result 에서 Seoul 만") 에서 그대로 참조 가능
 - 스트리밍 응답 + 응답 후 메트릭(시간·토큰·청크·sandbox 실행 시간)
 - 대화 → `.md` 다운로드
@@ -146,7 +149,8 @@ AI-tools/
 │   ├── skills/               ← ⭐ Skill 시스템
 │   │   ├── models.py           · Skill dataclass + SkillKind + render_template()
 │   │   ├── registry.py         · JSON 디스크 CRUD (시드 + 사용자 머지)
-│   │   └── seeds.py            · 13개 시드 (Excel 4 + persona 8 + enhance 1)
+│   │   └── seeds.py            · 14개 시드 (excel-default + Excel 4 + persona 8 + enhance 1)
+│   │                              + EXCEL_TABLE_GUIDE 상수 5198자 — Chat 의 표 작업 자동 가이드 단일 출처
 │   ├── storage/
 │   │   └── files.py            · 경로-안전 FileManager (traversal 차단)
 │   └── execution/
@@ -211,6 +215,18 @@ custom = Endpoint(
 )
 get_endpoints().save(custom)
 ```
+
+### Chat 시스템 프롬프트의 3-레이어 자동 합성
+
+Chat 페이지가 LLM 에게 보내는 system 메시지는 매번 자동으로 3개 부분이 `---` 로 합쳐집니다:
+
+| 레이어 | 출처 | 어떻게 정의? | 엑셀 첨부 시 동작 |
+|---|---|---|---|
+| **A. 사용자 시스템 프롬프트** | 사이드바 textarea | 사용자 직접 입력, 또는 🧰 스킬 선택 시 그 스킬의 `system_prompt` 로 덮어쓰기, 또는 ⭐ 즐겨찾기 슬롯 로드 | `excel-default` 자동 선택 → 5198자 가이드가 채워짐 |
+| **B. 파일 컨텍스트** | 자동 (`build_file_context`) | 코드가 첨부 파일마다 shape · 두 컬럼 후보 · raw 15행을 system 메시지에 주입 | 항상 자동 |
+| **C. 표 작업 가이드** | 자동 — `shared/skills/seeds.EXCEL_TABLE_GUIDE` 상수 참조 | 표 파일이 첨부됐고 **A 가 `excel-pandas` kind 스킬이 아니면** 자동 추가 | A 가 `excel-default` 면 중복이므로 자동 스킵 (단일 출처) |
+
+→ "결과 양식 보존", "병합 셀 ffill", "summary 행 제외", "pandas 2.x ExcelWriter 함정" 같이 **모든 사용자에게 공통 적용**할 규칙은 `EXCEL_TABLE_GUIDE` 한 곳에서 관리. 특정 작업 패턴은 별도 스킬로.
 
 ### Skill = (system prompt + user template + target page)
 
@@ -303,7 +319,7 @@ git diff --staged | grep -iE 'api.?key|secret|token|password|sk-[a-z0-9]'
 ### 구조적 유사성
 
 - **Chat 의 자동 파이프라인 + `excel-pandas` 스킬** 은 본질적으로 Claude Code skill 의 직접 대응: 의도(=스킬) → schema 자동 분석 → 코드 생성 → sandbox 실행 → 결과 파일. `/excel-merge` 같은 slash command 와 거의 1:1 매핑.
-- **`shared/skills/seeds.py`** 의 13개 시드 = Claude Code 의 plugin skill 카탈로그. 사용자가 추가하는 JSON 스킬 = `~/.claude/skills/*.md` 와 같은 위치.
+- **`shared/skills/seeds.py`** 의 14개 시드 = Claude Code 의 plugin skill 카탈로그. 사용자가 추가하는 JSON 스킬 = `~/.claude/skills/*.md` 와 같은 위치.
 - **Settings 의 📡 엔드포인트 관리** 는 Claude Code 의 `/config` + provider 설정과 유사 — 사용자 환경을 메타 레벨에서 관리.
 - **`render_template()` 의 자리표시자 치환** (`{task}`, `{file_list}`, `{schema_json}`) 은 Claude Code skill 의 인자 바인딩 메커니즘과 사고방식이 같다.
 

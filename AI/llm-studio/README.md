@@ -26,9 +26,9 @@ streamlit run app.py
 
 | 페이지 | 기능 |
 |---|---|
-| 💬 Chat (1)            | ChatGPT-style 통합 UI — 사이드바: 엔드포인트·모델·🧰 스킬·시스템 프롬프트. 본문: 채팅 입력 + 📎 인라인 파일 첨부 → 엑셀/CSV 자동 schema 주입 → LLM 이 ```python``` 응답하면 **격리 sandbox 에서 자동 실행** → 출력 파일 다운로드·미리보기 카드 |
+| 💬 Chat (1)            | ChatGPT-style 통합 UI — 사이드바: 엔드포인트·모델·🧰 스킬·시스템 프롬프트·⭐ 즐겨찾기 슬롯. 본문: 채팅 입력 + 📎 인라인 파일 첨부 → 엑셀/CSV 자동 schema 주입 → **`excel-default` 스킬 자동 선택** → LLM 이 ```python``` 응답하면 **격리 sandbox 에서 자동 실행** → 다단 헤더·그룹 소계·합계 양식 보존된 결과 파일을 다운로드·미리보기 카드로 |
 | ✨ Prompt Studio (2)   | 라이브러리(=chat-system 스킬) + 한 줄 → system prompt 향상 + 💾 스킬로 저장 |
-| 🧰 Skills (3)          | 시드 13개 + 사용자 스킬 CRUD (kind 필터, 검색, 복제) |
+| 🧰 Skills (3)          | 시드 14개 (🤖 excel-default + Excel 4 + 페르소나 8 + enhance 1) + 사용자 스킬 CRUD (kind 필터, 검색, 복제) |
 | 🦙 Ollama (4)          | 모델 pull(진행률) · 설치 리스트 · 삭제 · `?endpoint=<slug>` 로 다중 서버 |
 | ⚙️ Settings (5)        | **📡 연결 지점 (Endpoints)** + .env 편집(편집 모드 토글, 0600) |
 
@@ -43,7 +43,7 @@ llm-studio/
 ├── _bootstrap.py             · sys.path + data dir + SkillRegistry/EndpointRegistry 와이어업
 ├── components/
 │   ├── ui.py                 · header · badge · empty_state · section · sidebar_brand
-│   └── sidebar.py            · render_sidebar(page_id, kinds, with_task, with_limits)
+│   └── sidebar.py            · render_sidebar(page_id, kinds, with_task, with_limits, default_skill_slug)
 ├── pages/
 │   ├── 1_💬_Chat.py          · ChatGPT-style 통합 (파일 드롭 + Code Interpreter)
 │   ├── 2_✨_Prompt_Studio.py
@@ -63,12 +63,15 @@ from components import render_sidebar
 state = render_sidebar(
     "chat",
     kinds=["chat-system", "excel-pandas"],  # 사이드바 스킬 드롭다운에 보일 kind
+    default_skill_slug="excel-default" if has_tabular else None,  # 엑셀 첨부 시 자동 기본 선택
 )
 
 # state.endpoint, state.model, state.skill, state.system_prompt
 ```
 
-기본 엔드포인트 선택 순서: 세션에 저장된 직전 선택 → `.env` 의 `DEFAULT_PROVIDER` 가 가리키는 첫 엔드포인트 → 리스트 0번째.
+**자동 기본 선택**: `default_skill_slug` 가 주어지고 사용자가 아직 명시적으로 다른 선택을 한 적이 없으면 (None/"(없음)") 그 스킬을 promotion. 한 번이라도 사용자가 다른 걸 고르면 그 선택 영구 유지.
+
+**기본 엔드포인트 선택 순서**: 세션에 저장된 직전 선택 → `.env` 의 `DEFAULT_PROVIDER` 가 가리키는 첫 엔드포인트 → 리스트 0번째.
 
 ## 상세 문서
 
