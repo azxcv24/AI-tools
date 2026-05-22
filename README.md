@@ -127,6 +127,52 @@ chmod 600 .env
 
 ## 🏗️ 아키텍처
 
+### 구조도
+
+![LLM Studio 아키텍처](docs/architecture.png)
+
+> 사용자 → 5개 Streamlit 페이지 → 공유 사이드바(엔드포인트·모델·🧰 스킬·시스템 프롬프트) → Skill 레지스트리(14 시드 + `EXCEL_TABLE_GUIDE` 단일 출처) + Endpoint 레지스트리(`resolve(ep)` → 4 provider) → Chat 의 3-레이어 system prompt 자동 합성 → LLM 응답 → 격리 sandbox → 양식 보존된 결과 카드.
+>
+> <sub>다이어그램 소스: [docs/diagrams/architecture.mmd](docs/diagrams/architecture.mmd) · 재생성: `python3 docs/diagrams/render.py`</sub>
+
+<details>
+<summary>Mermaid 소스 보기 (GitHub 자동 렌더)</summary>
+
+```mermaid
+flowchart TB
+    U([👤 User])
+    subgraph Pages["🌐 Streamlit Pages"]
+        P1["💬 Chat"]
+        P2["✨ Prompt Studio"]
+        P3["🧰 Skills"]
+        P4["🦙 Ollama"]
+        P5["⚙️ Settings"]
+    end
+    SB["🧩 render_sidebar()<br/>endpoint·model·skill·prompt"]
+    subgraph SkillSys["🧰 shared/skills/"]
+        SR["SkillRegistry<br/>14 seeds + user JSON"]
+        ETG["EXCEL_TABLE_GUIDE<br/>5198자 단일 출처"]
+    end
+    subgraph EndpointSys["📡 shared/llm/"]
+        EP["EndpointRegistry"]
+        RESOLVE["resolve(ep, model)"]
+        PRV["Ollama·OpenAI·Anthropic·LiteLLM"]
+    end
+    SANDBOX["🛡️ run_pandas_code<br/>subprocess+rlimit+timeout"]
+    U --> Pages --> SB
+    SB --> SR
+    SB --> EP
+    SR -.->|system_prompt| ETG
+    SB --> RESOLVE
+    EP --> RESOLVE --> PRV
+    PRV -->|"text + python 코드"| SANDBOX
+    SANDBOX -->|"result.xlsx<br/>다단헤더·소계·합계"| U
+```
+
+</details>
+
+### 디렉토리
+
 ```
 AI-tools/
 ├── README.md              ← (this file)

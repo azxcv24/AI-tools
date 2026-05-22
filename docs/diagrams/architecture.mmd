@@ -1,0 +1,103 @@
+%% LLM Studio — Architecture diagram (Mermaid)
+%% Render: docs/diagrams/render.html → docs/architecture.png
+
+flowchart TB
+    %% ============ User ============
+    U([👤 User])
+
+    %% ============ Streamlit pages ============
+    subgraph Pages["🌐 Streamlit Pages  (AI/llm-studio/pages/)"]
+        direction LR
+        P1["💬 Chat<br/>파일 드롭 + 자동 Excel<br/>+ Code Interpreter"]
+        P2["✨ Prompt Studio<br/>라이브러리 + 향상"]
+        P3["🧰 Skills<br/>CRUD"]
+        P4["🦙 Ollama<br/>모델 풀/관리"]
+        P5["⚙️ Settings<br/>📡 Endpoints + .env"]
+    end
+
+    %% ============ Shared sidebar ============
+    SB["🧩 components/sidebar.py<br/><b>render_sidebar()</b><br/>🔌 endpoint · model · 🧰 skill<br/>📝 system prompt · ⭐ 슬롯"]
+
+    %% ============ Skill system ============
+    subgraph SkillSys["🧰 shared/skills/"]
+        SR["📚 SkillRegistry<br/>14 seeds + user JSON"]
+        ETG["📜 EXCEL_TABLE_GUIDE<br/>5,198자 · 단일 출처"]
+        SEEDS["🌱 SEED_SKILLS (14)<br/>🤖 excel-default ⭐<br/>📋📅📉 Excel 도메인 3<br/>🔍 구조 분석<br/>🔬👨‍💻🌐📊✍️🎤🧑‍🏫🎨 페르소나 8<br/>✨ prompt-enhancer"]
+    end
+
+    %% ============ Endpoint / Provider ============
+    subgraph EndpointSys["📡 shared/llm/"]
+        EP["📡 EndpointRegistry<br/>endpoints.json + .env 합성"]
+        RESOLVE["⚡ resolve(ep, model)"]
+        subgraph Providers["Providers"]
+            direction LR
+            PR1["🦙 Ollama"]
+            PR2["☁️ OpenAI"]
+            PR3["🧠 Anthropic"]
+            PR4["⚡ LiteLLM"]
+        end
+    end
+
+    %% ============ Execution / Storage ============
+    subgraph Exec["🛡️ shared/execution/"]
+        SANDBOX["⚙️ run_pandas_code<br/>subprocess + rlimit<br/>+ timeout + 출력 수집"]
+    end
+
+    %% ============ 3-layer system prompt assembly ============
+    subgraph Compose["🧱 Chat 의 3-레이어 system prompt 자동 합성"]
+        direction TB
+        LA["A · 사용자 입력 / 스킬<br/>(사이드바 textarea)"]
+        LB["B · 파일 컨텍스트<br/>(자동 build_file_context)"]
+        LC["C · 표 작업 가이드<br/>(자동 EXCEL_TABLE_GUIDE)<br/>* excel-pandas 스킬 적용 시 스킵 *"]
+    end
+
+    %% ============ extra terminal nodes ============
+    RESPONSE["📥 LLM 응답<br/>text + python 코드 블록"]
+    RESULT["📦 결과 카드<br/>다단 헤더 · 그룹 소계 · 합계<br/>다운로드 + 미리보기"]
+
+    %% ============ Edges ============
+    U -->|"브라우저"| Pages
+
+    P1 -->|"render_sidebar(chat,<br/>default=excel-default)"| SB
+    P2 --> SB
+    P5 -.->|"config"| EP
+
+    SB -->|"by_kind() 필터"| SR
+    SB -.->|"엔드포인트 선택"| EP
+
+    SR -.->|"merge seeds + user JSON"| SEEDS
+    SEEDS -.->|"system_prompt"| ETG
+
+    P1 -->|"호출 직전"| Compose
+    SR -.->|"스킬 system_prompt"| LA
+    P1 -.->|"shape·cols·raw 15행"| LB
+    ETG -.->|"단일 출처"| LC
+    Compose -->|"system_combined"| RESOLVE
+
+    EP -->|"Endpoint"| RESOLVE
+    RESOLVE --> Providers
+    Providers -->|"chat / stream"| RESPONSE
+
+    RESPONSE -->|"표 파일 + 코드 블록"| SANDBOX
+    SANDBOX -->|"outputs: result.xlsx"| RESULT
+    RESULT --> U
+
+    %% ============ Styling ============
+    classDef user fill:#FEF3C7,stroke:#D97706,color:#92400E
+    classDef page fill:#DBEAFE,stroke:#2563EB,color:#1E40AF
+    classDef skill fill:#FCE7F3,stroke:#DB2777,color:#9D174D
+    classDef endpoint fill:#D1FAE5,stroke:#059669,color:#065F46
+    classDef exec fill:#FEE2E2,stroke:#DC2626,color:#991B1B
+    classDef sidebar fill:#E0E7FF,stroke:#4F46E5,color:#3730A3
+    classDef compose fill:#F3E8FF,stroke:#7C3AED,color:#5B21B6
+    classDef result fill:#FEF9C3,stroke:#CA8A04,color:#854D0E
+
+    class U user
+    class P1,P2,P3,P4,P5 page
+    class SR,ETG,SEEDS skill
+    class EP,RESOLVE,PR1,PR2,PR3,PR4 endpoint
+    class SANDBOX exec
+    class SB sidebar
+    class LA,LB,LC compose
+    class RESPONSE result
+    class RESULT result
