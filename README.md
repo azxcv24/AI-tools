@@ -208,8 +208,10 @@ AI-tools/
 │       ├── app.py              · 랜딩 + 엔드포인트 상태 대시보드
 │       ├── _bootstrap.py       · sys.path + data dir + SkillRegistry/EndpointRegistry 싱글톤 와이어업
 │       ├── components/
-│       │   ├── ui.py           · header · badge · empty_state · sidebar_brand · section
-│       │   └── sidebar.py      · ⭐ 공유 사이드바 (엔드포인트+모델+스킬+시스템 프롬프트)
+│       │   ├── ui.py           · header · badge · empty_state · sidebar_brand · section · fmt_bytes
+│       │   ├── sidebar.py      · ⭐ 공유 사이드바 (엔드포인트+모델+스킬+시스템 프롬프트, with_system_prompt 토글)
+│       │   ├── skill_dialog.py · 공용 "스킬로 저장" 다이얼로그 (Chat·Prompt Studio)
+│       │   └── ollama_ui.py    · 공용 Ollama 모델 카탈로그 + pull 진행바 (Ollama·Settings)
 │       ├── pages/
 │       │   ├── 1_💬_Chat.py            · ⭐ ChatGPT-style 통합 (파일 드롭 + 자동 분석 + Code Interpreter)
 │       │   ├── 2_✨_Prompt_Studio.py   · 라이브러리(=Skill) + 향상 + 스킬로 저장
@@ -268,7 +270,7 @@ Chat 페이지가 LLM 에게 보내는 system 메시지는 매번 자동으로 3
 
 | 레이어 | 출처 | 어떻게 정의? | 엑셀 첨부 시 동작 |
 |---|---|---|---|
-| **A. 사용자 시스템 프롬프트** | 사이드바 textarea | 사용자 직접 입력, 또는 🧰 스킬 선택 시 그 스킬의 `system_prompt` 로 덮어쓰기, 또는 ⭐ 즐겨찾기 슬롯 로드 | `excel-default` 자동 선택 → 5198자 가이드가 채워짐 |
+| **A. 사용자 시스템 프롬프트** | 사이드바 textarea | 사용자 직접 입력, 또는 🧰 스킬 선택 시 그 스킬의 `system_prompt` 로 덮어쓰기 (재사용 프롬프트는 🧰 Skills 에 영구 저장 — 어디서나 불러오기) | `excel-default` 자동 선택 → 5198자 가이드가 채워짐 |
 | **B. 파일 컨텍스트** | 자동 (`build_file_context`) | 코드가 첨부 파일마다 shape · 두 컬럼 후보 · raw 15행을 system 메시지에 주입 | 항상 자동 |
 | **C. 표 작업 가이드** | 자동 — `shared/skills/seeds.EXCEL_TABLE_GUIDE` 상수 참조 | 표 파일이 첨부됐고 **A 가 `excel-pandas` kind 스킬이 아니면** 자동 추가 | A 가 `excel-default` 면 중복이므로 자동 스킵 (단일 출처) |
 

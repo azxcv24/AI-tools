@@ -10,8 +10,13 @@ Sidebar layout (top → bottom):
   2. Model dropdown (cached, per-endpoint)
   3. 🧰 Skill selectbox (filtered by `kinds`)
   4. 📝 System prompt textarea (pre-filled by selected skill)
+     — pass with_system_prompt=False on pages that own their own editor
+       (e.g. Prompt Studio) to avoid a duplicate input.
   5. (optional) 🛠 Task textarea (with_task=True)
   6. (optional) Timeout + memory sliders (with_limits=True)
+
+Reusable system prompts live in 🧰 Skills (persistent, searchable) — the
+sidebar deliberately does NOT carry an ephemeral "favorites" store anymore.
 """
 from __future__ import annotations
 
@@ -99,6 +104,7 @@ def render_sidebar(
     kinds: Sequence[SkillKind] | None = None,
     with_task: bool = False,
     with_limits: bool = False,
+    with_system_prompt: bool = True,
     default_skill_slug: str | None = None,
     default_system_prompt: str = (
         "당신은 한국어/영어 양쪽에 능숙한 데이터 분석 어시스턴트입니다.\n"
@@ -253,93 +259,39 @@ def render_sidebar(
             st.caption(chosen_skill.description)
 
         # ----- 📝 System prompt -----
-        st.divider()
-        st.markdown("##### 📝 시스템 프롬프트")
-
-        # Compatibility with the old Prompt-Studio handoff
         sys_key = f"sidebar_system__{page_id}"
-        if (
-            page_id in ("chat", "prompt-studio")
-            and "applied_system_prompt" in st.session_state
-            and sys_key not in st.session_state
-        ):
-            st.session_state[sys_key] = st.session_state.pop("applied_system_prompt")
-            applied_label = st.session_state.pop("applied_persona_label", None)
-            if applied_label:
-                st.markdown(badge(f"✨ {applied_label}", "info"), unsafe_allow_html=True)
-            else:
-                st.markdown(badge("✨ Prompt Studio 에서 적용됨", "info"), unsafe_allow_html=True)
+        if with_system_prompt:
+            st.divider()
+            st.markdown("##### 📝 시스템 프롬프트")
 
-        initial_sys = st.session_state.get(sys_key, default_system_prompt)
-        system_prompt = st.text_area(
-            "System prompt",
-            value=initial_sys,
-            height=140,
-            key=f"sidebar_system_input__{page_id}",
-            label_visibility="collapsed",
-        )
-        st.session_state[sys_key] = system_prompt
+            # Compatibility with the Prompt-Studio "💬 Chat 에 적용" handoff
+            if (
+                page_id == "chat"
+                and "applied_system_prompt" in st.session_state
+                and sys_key not in st.session_state
+            ):
+                st.session_state[sys_key] = st.session_state.pop("applied_system_prompt")
+                applied_label = st.session_state.pop("applied_persona_label", None)
+                if applied_label:
+                    st.markdown(badge(f"✨ {applied_label}", "info"), unsafe_allow_html=True)
+                else:
+                    st.markdown(badge("✨ Prompt Studio 에서 적용됨", "info"),
+                                unsafe_allow_html=True)
 
-        # ----- ⭐ Prompt slots (3 favorites, page-scoped) -----
-        slots_key = f"sidebar_prompt_slots__{page_id}"
-        slots = st.session_state.setdefault(
-            slots_key, [{"label": "", "content": ""} for _ in range(3)]
-        )
-        st.markdown("##### ⭐ 프롬프트 즐겨찾기")
-        st.caption("자주 쓰는 시스템 프롬프트 3개를 슬롯에 저장 / 한 번에 불러오기")
-        for i, slot in enumerate(slots, start=1):
-            with st.container(border=True):
-                has_content = bool(slot.get("content", "").strip())
-                label_display = slot.get("label") or (
-                    f"#{i} (비어있음)" if not has_content else f"#{i} 저장됨"
-                )
-                st.caption(f"**{label_display}**")
-                c_load, c_save, c_clear = st.columns(3)
-                if c_load.button(
-                    "📥",
-                    key=f"slot_load__{page_id}__{i}",
-                    use_container_width=True,
-                    disabled=not has_content,
-                    help="이 슬롯의 프롬프트를 위 시스템 프롬프트에 적용",
-                ):
-                    st.session_state[sys_key] = slot["content"]
-                    st.toast(f"📥 슬롯 #{i} 적용", icon="⭐")
-                    st.rerun()
-                if c_save.button(
-                    "💾",
-                    key=f"slot_save__{page_id}__{i}",
-                    use_container_width=True,
-                    disabled=not system_prompt.strip(),
-                    help="현재 시스템 프롬프트를 이 슬롯에 저장",
-                ):
-                    # If the user has typed a custom label via the input below,
-                    # honor it; otherwise auto-label from the first 24 chars.
-                    auto_label = (system_prompt.strip().splitlines()[0])[:24]
-                    slot["label"] = slot.get("label") or auto_label
-                    slot["content"] = system_prompt
-                    st.toast(f"💾 슬롯 #{i} 저장", icon="⭐")
-                    st.rerun()
-                if c_clear.button(
-                    "🗑️",
-                    key=f"slot_clear__{page_id}__{i}",
-                    use_container_width=True,
-                    disabled=not has_content,
-                    help="슬롯 비우기",
-                ):
-                    slot["label"] = ""
-                    slot["content"] = ""
-                    st.toast(f"🗑️ 슬롯 #{i} 비움", icon="⭐")
-                    st.rerun()
-                if has_content:
-                    new_label = st.text_input(
-                        "라벨",
-                        value=slot.get("label", ""),
-                        key=f"slot_label__{page_id}__{i}",
-                        label_visibility="collapsed",
-                        placeholder="짧은 라벨 (선택)",
-                    )
-                    if new_label != slot.get("label"):
-                        slot["label"] = new_label
+            initial_sys = st.session_state.get(sys_key, default_system_prompt)
+            system_prompt = st.text_area(
+                "System prompt",
+                value=initial_sys,
+                height=160,
+                key=f"sidebar_system_input__{page_id}",
+                label_visibility="collapsed",
+            )
+            st.session_state[sys_key] = system_prompt
+            st.caption("💡 자주 쓰는 프롬프트는 🧰 Skills 로 저장해 어디서나 불러오세요.")
+        else:
+            # Page owns its own editor (e.g. Prompt Studio) — don't render a
+            # duplicate input, but still surface any stored value if asked.
+            system_prompt = st.session_state.get(sys_key, "")
 
         # ----- 🛠 Task (Excel only) -----
         task = ""

@@ -11,10 +11,11 @@ from components import (  # noqa: E402
     inject_global_css,
     page_header,
     render_sidebar,
+    save_skill_dialog,
     sidebar_brand,
 )
 from shared.llm import enhance_to_system_prompt, resolve  # noqa: E402
-from shared.skills import Skill, get_registry  # noqa: E402
+from shared.skills import get_registry  # noqa: E402
 
 st.set_page_config(page_title="Prompt Studio · LLM Studio", page_icon="✨", layout="wide")
 inject_global_css()
@@ -30,10 +31,12 @@ page_header(
 # ============================================================
 # sidebar
 # ============================================================
+# This page owns its own large system-prompt editor below, so suppress the
+# sidebar's duplicate textarea (with_system_prompt=False).
 state = render_sidebar(
     "prompt-studio",
     kinds=["chat-system", "prompt-enhance"],
-    default_system_prompt="",
+    with_system_prompt=False,
 )
 
 
@@ -54,7 +57,7 @@ if state.skill and state.skill.kind == "chat-system":
 
 
 registry = get_registry()
-library_skills: list[Skill] = registry.by_kind("chat-system")
+library_skills = registry.by_kind("chat-system")
 
 
 # ============================================================
@@ -194,49 +197,18 @@ with right:
 
 
 # ============================================================
-# save-as-skill dialog
+# save-as-skill dialog (shared component)
 # ============================================================
-@st.dialog("스킬로 저장")
-def save_skill_dialog():
-    with st.form("save_skill_form", border=False):
-        slug = st.text_input("슬러그 (id)", placeholder="예: korean-translator")
-        name = st.text_input("이름", placeholder="예: 한국어 번역가")
-        icon = st.text_input("아이콘", value="💬", max_chars=4)
-        description = st.text_input("설명 (한 줄)")
-        tags_str = st.text_input("태그 (쉼표 구분)", placeholder="예: chat, ko")
-        st.caption("System prompt 는 현재 편집기 내용으로 저장됩니다.")
-        cx, cy = st.columns(2)
-        cancel = cx.form_submit_button("취소", use_container_width=True)
-        save = cy.form_submit_button("💾 저장", type="primary", use_container_width=True)
-
-    if cancel:
-        st.session_state.pop("show_save_skill_dialog", None)
-        st.rerun()
-    if save:
-        try:
-            tags = tuple(t.strip() for t in (tags_str or "").split(",") if t.strip())
-            skill = Skill(
-                slug=slug.strip(),
-                name=name.strip() or slug.strip(),
-                icon=icon.strip() or "💬",
-                kind="chat-system",
-                description=description.strip(),
-                system_prompt=st.session_state.studio_prompt,
-                user_prompt_template="",
-                tags=tags,
-                default_endpoint=state.endpoint.slug if state.endpoint else None,
-                default_model=state.model or None,
-            )
-            saved = registry.save(skill)
-            st.toast(f"💾 `{saved.slug}` 저장", icon="🧰")
-            st.session_state.pop("show_save_skill_dialog", None)
-            st.rerun()
-        except Exception as e:
-            st.error(f"저장 실패: {type(e).__name__}: {e}")
-
-
 if st.session_state.get("show_save_skill_dialog"):
-    save_skill_dialog()
+    save_skill_dialog(
+        flag_key="show_save_skill_dialog",
+        system_prompt=st.session_state.studio_prompt,
+        user_template=None,                 # chat-system skills carry no template
+        kind_choices=("chat-system",),
+        default_endpoint=state.endpoint.slug if state.endpoint else None,
+        default_model=state.model or None,
+        intro="현재 편집기의 system prompt 를 재사용 가능한 chat-system 스킬로 저장합니다.",
+    )
 
 
 st.divider()

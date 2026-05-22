@@ -194,6 +194,18 @@ def inject_global_css() -> None:
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
+def fmt_bytes(num_bytes: float) -> str:
+    """Human-readable byte size — shared by file cards and model listings."""
+    if num_bytes <= 0:
+        return "-"
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
 # ------------------------------------------------------------
 # Widgets
 # ------------------------------------------------------------

@@ -6,7 +6,15 @@ import _bootstrap  # noqa: F401,E402
 
 import streamlit as st  # noqa: E402
 
-from components import badge, inject_global_css, page_header, sidebar_brand  # noqa: E402
+from components import (  # noqa: E402
+    POPULAR_CHAT,
+    POPULAR_EMBED,
+    badge,
+    inject_global_css,
+    page_header,
+    run_pull,
+    sidebar_brand,
+)
 from shared.llm import (  # noqa: E402
     PROVIDER_KINDS,
     Endpoint,
@@ -423,29 +431,6 @@ for group in GROUPS:
 # ============================================================
 # Ollama 모델 풀 다이얼로그 (Settings 안에서 직접 다운로드)
 # ============================================================
-_POPULAR_OLLAMA = [
-    ("llama3.2:1b",      "1.3GB", "Llama 3.2 — 초경량"),
-    ("llama3.2:3b",      "2.0GB", "Llama 3.2 — 균형형 (추천 시작점)"),
-    ("llama3.1:8b",      "4.7GB", "Llama 3.1 — 표준 사이즈"),
-    ("qwen2.5:7b",       "4.7GB", "Qwen 2.5 — 다국어 우수"),
-    ("mistral:7b",       "4.4GB", "Mistral — 코드 강점"),
-    ("gemma2:2b",        "1.6GB", "Google Gemma 2"),
-    ("phi3:mini",        "2.3GB", "Microsoft Phi-3 Mini"),
-    ("deepseek-r1:7b",   "4.7GB", "DeepSeek R1 — 추론 강화"),
-    ("nomic-embed-text", "274MB", "Nomic — 일반 임베딩"),
-]
-
-
-def _fmt_bytes(b: float) -> str:
-    if b <= 0:
-        return "-"
-    for unit in ("B", "KB", "MB", "GB"):
-        if b < 1024 or unit == "GB":
-            return f"{b:.1f} {unit}" if unit != "B" else f"{b:.0f} {unit}"
-        b /= 1024
-    return f"{b:.1f} TB"
-
-
 @st.dialog("📥 Ollama 모델 풀")
 def ollama_pull_dialog():
     slug = st.session_state.get("ollama_pull_slug")
@@ -469,12 +454,13 @@ def ollama_pull_dialog():
         st.warning(f"서버 연결 실패: {type(e).__name__}: {e}")
 
     st.markdown("**인기 모델**")
-    for name, size, desc in _POPULAR_OLLAMA:
+    for item in POPULAR_CHAT + POPULAR_EMBED:
+        name = item["name"]
         with st.container(border=True):
             cc1, cc2, cc3, cc4 = st.columns([3, 1, 4, 1.5])
             cc1.markdown(f"`{name}`")
-            cc2.markdown(badge(size, "info"), unsafe_allow_html=True)
-            cc3.caption(desc)
+            cc2.markdown(badge(item["size"], "info"), unsafe_allow_html=True)
+            cc3.caption(item["desc"])
             if name in installed:
                 cc4.markdown(badge("✅ 설치됨", "ok"), unsafe_allow_html=True)
             else:
@@ -498,28 +484,8 @@ def ollama_pull_dialog():
     # ----- run pull (single click per rerun) -----
     target = st.session_state.pop("_ollama_pull_target", None)
     if target and provider is not None:
-        with st.status(f"📥 `{target}` 다운로드 중…", expanded=True) as status:
-            progress = st.progress(0.0)
-            detail = st.empty()
-            try:
-                for evt in provider.pull(target):
-                    s = evt.get("status", "")
-                    total = evt.get("total")
-                    completed = evt.get("completed")
-                    if total and completed:
-                        frac = min(completed / total, 1.0)
-                        progress.progress(frac)
-                        detail.write(
-                            f"`{s}` · {_fmt_bytes(completed)} / "
-                            f"{_fmt_bytes(total)} · {frac*100:.1f}%"
-                        )
-                    else:
-                        detail.write(f"`{s}`")
-                progress.progress(1.0)
-                status.update(label=f"✅ `{target}` 완료", state="complete", expanded=False)
-                st.toast(f"📥 `{target}` 설치됨", icon="🦙")
-            except Exception as e:
-                status.update(label=f"❌ pull 실패: {e}", state="error")
+        if run_pull(provider, target):
+            st.toast(f"📥 `{target}` 설치됨", icon="🦙")
 
     st.divider()
     if st.button("닫기", use_container_width=True):

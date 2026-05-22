@@ -21,16 +21,17 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from components import (  # noqa: E402
-    badge,
     empty_state,
+    fmt_bytes,
     inject_global_css,
     page_header,
     render_sidebar,
+    save_skill_dialog,
     sidebar_brand,
 )
 from shared.execution import run_pandas_code  # noqa: E402
 from shared.llm import Message, resolve  # noqa: E402
-from shared.skills import EXCEL_TABLE_GUIDE, Skill, get_registry  # noqa: E402
+from shared.skills import EXCEL_TABLE_GUIDE  # noqa: E402
 
 st.set_page_config(page_title="Chat · LLM Studio", page_icon="💬", layout="wide")
 inject_global_css()
@@ -74,14 +75,6 @@ def is_tabular(name: str) -> bool:
 
 def is_text(name: str) -> bool:
     return ext_of(name) in TEXT_EXTS
-
-
-def fmt_size(b: int) -> str:
-    if b < 1024:
-        return f"{b} B"
-    if b < 1024 * 1024:
-        return f"{b/1024:.1f} KB"
-    return f"{b/1024/1024:.1f} MB"
 
 
 def icon_for(name: str) -> str:
@@ -228,7 +221,7 @@ def build_file_context(attachments: dict[str, bytes]) -> str:
             tail = "  (truncated)" if truncated else ""
             blocks.append(f"[file: {name}]{tail}\n```\n{text}\n```")
         else:
-            blocks.append(f"[file: {name}] (binary, {fmt_size(len(data))} — content not shown)")
+            blocks.append(f"[file: {name}] (binary, {fmt_bytes(len(data))} — content not shown)")
     return (
         "현재 대화에 첨부된 파일 목록과 메타데이터입니다. 코드를 작성할 때는 "
         "이 파일들을 현재 디렉토리에서 같은 이름으로 읽을 수 있다고 가정하세요.\n\n"
@@ -260,7 +253,7 @@ def render_file_card(name: str, data: bytes, *, key_prefix: str, expanded: bool 
     with st.container(border=True):
         c1, c2, c3 = st.columns([4, 2, 2])
         c1.markdown(f"**{icon_for(name)} `{name}`**")
-        c2.caption(fmt_size(len(data)))
+        c2.caption(fmt_bytes(len(data)))
         c3.download_button(
             "⬇️ 다운로드",
             data=data,
@@ -326,7 +319,7 @@ with st.sidebar:
         for name, data in atts.items():
             c1, c2, c3 = st.columns([5, 1, 1])
             c1.markdown(f"{icon_for(name)} `{name}`")
-            c1.caption(fmt_size(len(data)))
+            c1.caption(fmt_bytes(len(data)))
             c2.download_button(
                 "⬇️",
                 data=data,
@@ -704,85 +697,21 @@ def _build_user_template_seed(user_text: str, files: list[str]) -> str:
     return seed
 
 
-@st.dialog("스킬로 저장")
-def chat_save_skill_dialog():
-    last_user = st.session_state.get("last_chat_user") or ""
-    last_system = st.session_state.get("last_chat_system") or ""
-    last_files = st.session_state.get("last_chat_files") or []
-    suggested_kind = st.session_state.get("last_chat_kind") or "chat-system"
-
-    template_seed = _build_user_template_seed(last_user, last_files)
-
-    st.caption(
-        "방금 사용한 시스템 프롬프트 + 사용자 메시지를 재사용 가능한 스킬로 저장. "
-        "자리표시자 `{file_list}` · `{task}` · `{schema_json}` 을 활용하면 다음 호출에서 "
-        "다른 파일·작업으로 재사용됩니다."
-    )
-
-    with st.form("chat_save_skill_form", border=False):
-        slug = st.text_input("슬러그 (id)", placeholder="예: my-monthly-summary",
-                             help="소문자·숫자·하이픈, 1-64자")
-        name = st.text_input("이름", placeholder="예: 월별 매출 요약")
-        c_icon, c_kind = st.columns([1, 3])
-        icon = c_icon.text_input("아이콘", value="📊" if suggested_kind == "excel-pandas" else "💬",
-                                  max_chars=4)
-        kind_options = ["chat-system", "excel-pandas"]
-        kind = c_kind.selectbox(
-            "Kind",
-            kind_options,
-            index=kind_options.index(suggested_kind) if suggested_kind in kind_options else 0,
-            help="excel-pandas: Excel 작업용 / chat-system: 일반 대화용",
-        )
-        description = st.text_input("설명 (한 줄)")
-        tags_str = st.text_input("태그 (쉼표 구분)", placeholder="예: excel, budget, ko")
-
-        st.markdown("**System prompt** (사용자가 입력한 부분만 — 자동 생성된 file context 는 제외)")
-        sys_prompt = st.text_area(
-            "system",
-            value=last_system,
-            height=140,
-            label_visibility="collapsed",
-        )
-
-        st.markdown("**User prompt template** — `{file_list}` 등 자리표시자 사용 권장")
-        user_template = st.text_area(
-            "user_template",
-            value=template_seed,
-            height=140,
-            label_visibility="collapsed",
-        )
-
-        cx, cy = st.columns(2)
-        cancel = cx.form_submit_button("취소", use_container_width=True)
-        save = cy.form_submit_button("💾 저장", type="primary", use_container_width=True)
-
-    if cancel:
-        st.session_state.pop("show_chat_save_dialog", None)
-        st.rerun()
-
-    if save:
-        try:
-            tags = tuple(t.strip() for t in (tags_str or "").split(",") if t.strip())
-            new = Skill(
-                slug=slug.strip(),
-                name=name.strip() or slug.strip(),
-                icon=icon.strip() or ("📊" if kind == "excel-pandas" else "💬"),
-                kind=kind,
-                description=description.strip(),
-                system_prompt=sys_prompt,
-                user_prompt_template=user_template,
-                tags=tags,
-                default_endpoint=state.endpoint.slug if state.endpoint else None,
-                default_model=state.model or None,
-            )
-            saved = get_registry().save(new)
-            st.toast(f"💾 `{saved.slug}` 저장 — 사이드바 🧰 스킬 드롭다운에서 즉시 사용 가능",
-                     icon="🧰")
-            st.session_state.pop("show_chat_save_dialog", None)
-            st.rerun()
-        except Exception as e:
-            st.error(f"저장 실패: {type(e).__name__}: {e}")
-
-
 if st.session_state.get("show_chat_save_dialog"):
-    chat_save_skill_dialog()
+    save_skill_dialog(
+        flag_key="show_chat_save_dialog",
+        system_prompt=st.session_state.get("last_chat_system") or "",
+        user_template=_build_user_template_seed(
+            st.session_state.get("last_chat_user") or "",
+            st.session_state.get("last_chat_files") or [],
+        ),
+        kind_choices=("chat-system", "excel-pandas"),
+        suggested_kind=st.session_state.get("last_chat_kind") or "chat-system",
+        default_endpoint=state.endpoint.slug if state.endpoint else None,
+        default_model=state.model or None,
+        intro=(
+            "방금 사용한 시스템 프롬프트 + 사용자 메시지를 재사용 가능한 스킬로 저장. "
+            "자리표시자 `{file_list}` · `{task}` · `{schema_json}` 을 활용하면 다음 호출에서 "
+            "다른 파일·작업으로 재사용됩니다."
+        ),
+    )
